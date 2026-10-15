@@ -34,7 +34,7 @@ Helldivers 2 — динамик, HD-вибрация и адаптивные т�
 2. На появившейся вкладке **Разработчик** (Developer) выберите **Установить плагин по URL**
    (Install Plugin from URL) и вставьте ссылку
    на архив из [последнего релиза](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), например:
-   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.0/decky-dualsense-wired-v0.5.0.zip`.
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.1/decky-dualsense-wired-v0.5.1.zip`.
    Либо скачайте архив на Deck и выберите **Установить плагин из ZIP-файла** (Install Plugin from ZIP File).
 3. Подтвердите установку. Плагин работает от root — это нужно для виртуального USB-контроллера.
 4. Подключите DualSense по Bluetooth. В свойствах игры **выключите Steam Input**.

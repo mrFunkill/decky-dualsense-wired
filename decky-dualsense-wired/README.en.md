@@ -33,7 +33,7 @@ Requires [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
 1. In Decky: ⚙ **Settings → General** → turn on **Developer mode**.
 2. On the new **Developer** tab choose **Install Plugin from URL** and paste the link to the archive from
    the [latest release](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), e.g.
-   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.0/decky-dualsense-wired-v0.5.0.zip`.
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.1/decky-dualsense-wired-v0.5.1.zip`.
    Or download the archive to the Deck and choose **Install Plugin from ZIP File**.
 3. Confirm the installation. The plugin runs as root — this is needed for the virtual USB controller.
 4. Connect the DualSense over Bluetooth. In the game's properties **turn off Steam Input**.

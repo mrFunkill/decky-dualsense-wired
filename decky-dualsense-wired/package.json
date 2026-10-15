@@ -1,6 +1,6 @@
 {
   "name": "decky-dualsense-wired",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Makes a Bluetooth DualSense appear to games as a wired (USB) controller",
   "type": "module",
   "scripts": {
