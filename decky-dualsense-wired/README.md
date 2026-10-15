@@ -23,6 +23,22 @@ Helldivers 2 — динамик, HD-вибрация и адаптивные т�
 
 Нужно, чтобы для игры был **выключен Steam Input** (иначе игра видит контроллер Xbox).
 
+## Установка
+
+Нужен установленный [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
+
+1. В Decky: ⚙ **Настройки → Общие** → включите **Режим разработчика** (Developer mode).
+2. На появившейся вкладке **Разработчик** (Developer) выберите **Установить плагин по URL**
+   (Install Plugin from URL) и вставьте ссылку
+   на архив из [последнего релиза](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), например:
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.0/decky-dualsense-wired-v0.5.0.zip`.
+   Либо скачайте архив на Deck и выберите **Установить плагин из ZIP-файла** (Install Plugin from ZIP File).
+3. Подтвердите установку. Плагин работает от root — это нужно для виртуального USB-контроллера.
+4. Подключите DualSense по Bluetooth. В свойствах игры **выключите Steam Input**.
+
+Удаляется плагин штатно через Decky: он сам вернёт геймпад Steam и уберёт свою службу из
+префиксов Proton.
+
 ## Как это устроено
 
 Бэкенд (`main.py`, `py_modules/`) работает от root (флаг `root` в `plugin.json`).

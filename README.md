@@ -7,6 +7,9 @@
 *A Decky Loader plugin that makes a Bluetooth DualSense work like a wired one on the Steam Deck,
 including the controller speaker, HD haptics and adaptive triggers in Proton games.*
 
+**Установка:** архив плагина — в [релизах](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest),
+инструкция — в [README плагина](decky-dualsense-wired/README.md#установка).
+
 | Папка | Что внутри |
 |---|---|
 | [`decky-dualsense-wired/`](decky-dualsense-wired/) | Плагин: описание, устройство, сборка и установка — в его [README](decky-dualsense-wired/README.md) |
