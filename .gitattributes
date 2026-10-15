@@ -1,0 +1,6 @@
+* text=auto
+# Run on the Steam Deck: must keep LF line endings.
+*.sh text eol=lf
+*.py text eol=lf
+*.exe binary
+*.png binary

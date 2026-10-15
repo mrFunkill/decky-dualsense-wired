@@ -1,0 +1,11 @@
+{
+  "name": "DualSense Wired",
+  "author": "mrFunkill",
+  "flags": ["debug", "root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["controller", "dualsense", "root"],
+    "description": "Makes a DualSense connected over Bluetooth work like a wired (USB) one, including the controller speaker, HD haptics and adaptive triggers in Proton games.",
+    "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
+  }
+}

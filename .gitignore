@@ -1,0 +1,8 @@
+# Raw captures and lists that describe the author's own devices, MAC addresses and game library.
+# research/CAPTURE.md explains how to record your own captures.
+research/captures/
+research/windows-dualsense-usb.txt
+research/pcgw-library.jsonl
+research/library-games.txt
+
+__pycache__/
