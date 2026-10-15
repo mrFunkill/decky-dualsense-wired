@@ -15,6 +15,7 @@ import {
 } from "@decky/api"
 import { useEffect, useRef, useState } from "react";
 import { FaPlaystation } from "react-icons/fa";
+import { t } from "./i18n";
 
 interface AudioStreamStatus {
   state: "starting" | "active" | "stopped" | "error";
@@ -40,15 +41,10 @@ interface ControllerStatus {
   battery?: { capacity: number; status: string } | null;
 }
 
-const BATTERY_STATUS: Record<string, string> = {
-  Discharging: "",
-  Charging: ", заряжается",
-  Full: ", заряжен",
-};
-
 function batteryText(battery: ControllerStatus["battery"]) {
   if (!battery) return "";
-  return ` · 🔋 ${battery.capacity}%${BATTERY_STATUS[battery.status] ?? ""}`;
+  const status = battery.status === "Charging" ? t().charging : battery.status === "Full" ? t().full : "";
+  return ` · 🔋 ${battery.capacity}%${status}`;
 }
 
 interface AudioOptions {
@@ -71,14 +67,6 @@ interface Status {
 const getStatus = callable<[], Status>("get_status");
 const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
 const setAudio = callable<[options: Partial<AudioOptions>], Status>("set_audio");
-
-const STATE_LABELS: Record<ControllerStatus["state"], string> = {
-  idle: "Не эмулируется",
-  starting: "Запуск…",
-  active: "Эмулируется как проводной",
-  stopped: "Остановлен",
-  error: "Ошибка",
-};
 
 function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Status) => void }) {
   const [audio, setLocal] = useState<AudioOptions>(status.audio);
@@ -103,13 +91,14 @@ function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Stat
   const streams = status.controllers.filter((c) => c.connection === "bluetooth" && c.audio);
   const bluetooth = status.controllers.some((c) => c.connection === "bluetooth");
   const streaming = audio.enabled || audio.game_audio;
+  const s = t();
 
   return (
-    <PanelSection title="Звук и вибрация">
+    <PanelSection title={s.audio}>
       <PanelSectionRow>
         <ToggleField
-          label="Звук игр на контроллер"
-          description="Динамик и HD-вибрация в играх с поддержкой DualSense, как по проводу"
+          label={s.gameAudio}
+          description={s.gameAudioDescription}
           checked={audio.game_audio}
           disabled={!status.enabled}
           onChange={(value) => apply({ game_audio: value })}
@@ -117,8 +106,8 @@ function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Stat
       </PanelSectionRow>
       <PanelSectionRow>
         <ToggleField
-          label="Весь звук Deck на контроллер"
-          description="Вместо звука игр: всё, что играет Deck, вибрация из звука"
+          label={s.deckAudio}
+          description={s.deckAudioDescription}
           checked={audio.enabled}
           disabled={!status.enabled}
           onChange={(value) => apply({ enabled: value })}
@@ -127,34 +116,33 @@ function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Stat
       {streaming && (
         <>
           <PanelSectionRow>
-            <ToggleField label="Динамик контроллера" checked={audio.speaker}
+            <ToggleField label={s.speaker} checked={audio.speaker}
               onChange={(value) => apply({ speaker: value })} />
           </PanelSectionRow>
           <PanelSectionRow>
-            <SliderField label="Громкость" value={audio.volume} min={0} max={100} step={5}
+            <SliderField label={s.volume} value={audio.volume} min={0} max={100} step={5}
               showValue valueSuffix="%" disabled={!audio.speaker}
               onChange={(value) => apply({ volume: value }, true)} />
           </PanelSectionRow>
           <PanelSectionRow>
-            <ToggleField label="Вибрация" checked={audio.haptics}
+            <ToggleField label={s.haptics} checked={audio.haptics}
               onChange={(value) => apply({ haptics: value })} />
           </PanelSectionRow>
           <PanelSectionRow>
-            <SliderField label="Сила вибрации" value={audio.haptics_gain} min={0} max={300} step={10}
+            <SliderField label={s.hapticsGain} value={audio.haptics_gain} min={0} max={300} step={10}
               showValue valueSuffix="%" disabled={!audio.haptics}
               onChange={(value) => apply({ haptics_gain: value }, true)} />
           </PanelSectionRow>
           {!bluetooth && (
             <PanelSectionRow>
-              <Field label="Нет DualSense по Bluetooth" description="Звук передаётся только по Bluetooth" />
+              <Field label={s.noBluetooth} description={s.noBluetoothDescription} />
             </PanelSectionRow>
           )}
           {streams.map((c) => (
             <PanelSectionRow key={c.hidraw}>
-              <Field label={`${c.audio!.source === "controller" ? "Звук игр" : "Звук Deck"}: ` +
-                  (c.audio!.state === "error" ? "ошибка" : c.audio!.state)}
-                description={c.audio!.error ??
-                  `пакетов ${c.audio!.sent} · пропусков ${c.audio!.underruns}`} />
+              <Field label={`${c.audio!.source === "controller" ? s.streamGame : s.streamDeck}: ` +
+                  s.streamState[c.audio!.state]}
+                description={c.audio!.error ?? s.streamStats(c.audio!.sent, c.audio!.underruns)} />
             </PanelSectionRow>
           ))}
         </>
@@ -177,8 +165,9 @@ function Content() {
     };
   }, []);
 
+  const s = t();
   if (!status) {
-    return <PanelSection><PanelSectionRow>Загрузка…</PanelSectionRow></PanelSection>;
+    return <PanelSection><PanelSectionRow>{s.loading}</PanelSectionRow></PanelSection>;
   }
 
   return (
@@ -186,8 +175,8 @@ function Content() {
       <PanelSection>
         <PanelSectionRow>
           <ToggleField
-            label="Эмуляция проводного подключения"
-            description="DualSense по Bluetooth будет виден играм как подключённый по USB"
+            label={s.emulation}
+            description={s.emulationDescription}
             checked={status.enabled}
             disabled={!status.uhid_available}
             onChange={async (value) => setStatus(await setEnabled(value))}
@@ -195,20 +184,20 @@ function Content() {
         </PanelSectionRow>
         {!status.is_root && (
           <PanelSectionRow>
-            <Field label="Бэкенд запущен не от root" description="Нужен флаг &quot;root&quot; в plugin.json" />
+            <Field label={s.notRoot} description={s.notRootDescription} />
           </PanelSectionRow>
         )}
         {!status.uhid_available && (
           <PanelSectionRow>
-            <Field label="/dev/uhid недоступен" description="Модуль ядра uhid не загружен" />
+            <Field label={s.noUhid} description={s.noUhidDescription} />
           </PanelSectionRow>
         )}
       </PanelSection>
       {/* Right under the main toggle: state and battery visible without scrolling. */}
-      <PanelSection title="Контроллеры">
+      <PanelSection title={s.controllers}>
         {status.controllers.length === 0 ? (
           <PanelSectionRow>
-            <Field label="DualSense не найден" />
+            <Field label={s.noController} />
           </PanelSectionRow>
         ) : (
           status.controllers.map((c) => (
@@ -217,10 +206,10 @@ function Content() {
                 label={c.name}
                 description={
                   c.state === "error"
-                    ? `${STATE_LABELS[c.state]}: ${c.error}`
-                    : `${STATE_LABELS[c.state]} · ${c.connection === "usb" ? "USB" : "Bluetooth"}` +
+                    ? `${s.state[c.state]}: ${c.error}`
+                    : `${s.state[c.state]} · ${c.connection === "usb" ? "USB" : "Bluetooth"}` +
                       batteryText(c.battery) +
-                      (c.mode === "usb-gadget" ? " · виртуальный USB со звуком" : "") +
+                      (c.mode === "usb-gadget" ? ` · ${s.virtualUsb}` : "") +
                       ` · ${c.mac}`
                 }
               />
@@ -238,7 +227,7 @@ function Content() {
 export default definePlugin(() => {
   // Steam shows no battery for the virtual wired controller; warn about a low one ourselves.
   const onLowBattery = addEventListener<[name: string, capacity: number]>("low_battery", (name, capacity) =>
-    toaster.toast({ title: "DualSense: низкий заряд", body: `${name}: ${capacity}%` }));
+    toaster.toast({ title: t().lowBattery, body: `${name}: ${capacity}%` }));
   return {
     onDismount() {
       removeEventListener("low_battery", onLowBattery);

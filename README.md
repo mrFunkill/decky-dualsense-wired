@@ -8,7 +8,8 @@
 including the controller speaker, HD haptics and adaptive triggers in Proton games.*
 
 **Установка:** архив плагина — в [релизах](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest),
-инструкция — в [README плагина](decky-dualsense-wired/README.md#установка).
+инструкция — в [README плагина](decky-dualsense-wired/README.md#установка)
+([English](decky-dualsense-wired/README.en.md#installation)).
 
 | Папка | Что внутри |
 |---|---|
