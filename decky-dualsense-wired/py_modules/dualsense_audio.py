@@ -59,6 +59,8 @@ SUB_SETTINGS = 0x10
 SUB_STREAM = 0x11
 SUB_HAPTICS = 0x12
 SUB_OPUS = 0x13
+SUB_OPUS_HEADPHONES = 0x16     # same Opus frame, played on the 3.5 mm jack (as in DS5Dongle)
+INPUT_PLUG_OFFSET = 55         # Bluetooth input report 0x31: bit 0 = headphones plugged in
 SUB_PRESENT = 0x80
 SUB_TWO_BLOCKS = 0x40
 
@@ -333,6 +335,7 @@ class AudioStreamer(threading.Thread):
         # reports/s overflow BlueZ's socket, and BlueZ then drops the HID device.
         self._game_output = OutputState()
         self._game_audio_control = None
+        self._headphones = False
         self._logged_outputs = 0
         self._stop_event = threading.Event()
         self._queue = collections.deque()
@@ -372,6 +375,9 @@ class AudioStreamer(threading.Thread):
             block[4] = block[5] = volume
             block[7] = audio_control
         return bytes(block)
+
+    def _opus_block(self):
+        return SUB_OPUS_HEADPHONES if self._headphones else SUB_OPUS
 
     def _send_game_output(self, fd, seq):
         """
@@ -496,6 +502,11 @@ class AudioStreamer(threading.Thread):
                 return level
             if len(report) == 78 and report[0] == 0x31:
                 level = report[INPUT_AUDIO_LEVEL_OFFSET]
+                headphones = bool(report[INPUT_PLUG_OFFSET] & 0x01)
+                if headphones != self._headphones:
+                    self._headphones = headphones
+                    self.log.info("Headphones %s: audio goes to the %s", "plugged in" if headphones else "unplugged",
+                                  "3.5 mm jack" if headphones else "controller speaker")
 
     def run(self):
         import array
@@ -621,7 +632,7 @@ class AudioStreamer(threading.Thread):
                     last_adjust = tick
                     (o1, h1), (o2, h2) = encode(raw), encode(raw2)
                     report = build_report(0x39, seq, [(SUB_STREAM, [stream_header(seq, self.options["latency"])]),
-                                                      (SUB_OPUS, [o1, o2]), (SUB_HAPTICS, [h1, h2])])
+                                                      (self._opus_block(), [o1, o2]), (SUB_HAPTICS, [h1, h2])])
                     self._write(fd, report)
                     counts["double"] += 1
                     seq += 1
@@ -632,7 +643,7 @@ class AudioStreamer(threading.Thread):
                     opus, haptics = encode(raw)
                     report = build_report(0x36, seq, [
                         (SUB_SETTINGS, [settings]), (SUB_STREAM, [stream_header(seq, self.options["latency"])]),
-                        (SUB_OPUS, [opus]), (SUB_HAPTICS, [haptics])])
+                        (self._opus_block(), [opus]), (SUB_HAPTICS, [haptics])])
                     self._write(fd, report)
                     seq += 1
                     seq = self._send_game_output(fd, seq)
