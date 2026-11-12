@@ -82,7 +82,7 @@ const installUpdate = callable<[], { ok: boolean; version?: string; error?: stri
 /** Current version, a manual check against GitHub releases, and the update itself. */
 function UpdateSection() {
   const [info, setInfo] = useState<UpdateInfo | undefined>();
-  const [state, setState] = useState<"idle" | "checking" | "updating" | "failed">("idle");
+  const [state, setState] = useState<"idle" | "checking" | "updating" | "installed" | "failed">("idle");
   const [error, setError] = useState<string | undefined>();
   const check = async (force: boolean) => {
     setState("checking");
@@ -97,6 +97,7 @@ function UpdateSection() {
   const status =
     state === "checking" ? s.checking :
     state === "failed" ? `${s.updateFailed}: ${error}` :
+    state === "installed" ? s.updateInstalled :
     !info ? "" :
     info.error ? `${s.checkFailed}: ${info.error}` :
     info.available && info.latest ? s.updateAvailable(info.latest) :
@@ -108,7 +109,8 @@ function UpdateSection() {
       </PanelSectionRow>
       {info?.available && info.latest ? (
         <PanelSectionRow>
-          <ButtonItem layout="below" disabled={state === "updating"} description={s.updateDescription}
+          <ButtonItem layout="below" disabled={state === "updating" || state === "installed"}
+            description={s.updateDescription}
             onClick={async () => {
               setState("updating");
               // On success Decky reloads the plugin, and this panel with it.
@@ -116,6 +118,9 @@ function UpdateSection() {
               if (!result.ok) {
                 setError(result.error);
                 setState("failed");
+              } else {
+                // Normally the reload replaces this panel well before that.
+                window.setTimeout(() => setState("installed"), 15000);
               }
             }}>
             {state === "updating" ? s.updating : s.updateButton(info.latest)}

@@ -60,6 +60,7 @@ const en = {
   updateButton: (v: string) => `Update to v${v}`,
   updating: "Updating…",
   updateFailed: "Update failed",
+  updateInstalled: "Installed. If the panel still shows the old version, restart Steam",
 };
 
 type Strings = typeof en;
@@ -123,6 +124,7 @@ const ru: Strings = {
   updateButton: (v: string) => `Обновить до v${v}`,
   updating: "Обновление…",
   updateFailed: "Не удалось обновить",
+  updateInstalled: "Установлено. Если панель показывает старую версию, перезапустите Steam",
 };
 
 // Steam client's localization; the first locale is the UI language ("russian", "english", ...).

@@ -145,11 +145,30 @@ def apply_update(root, plugin_dir):
         src = os.path.join(root, rel)
         dst = os.path.join(plugin_dir, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
+        # Zips made on Windows carry no permission bits: the helper in bin/ must stay executable.
+        mode = 0o755 if rel.startswith("bin/") else 0o644
+        if rel in RELOAD_FILES and os.path.exists(dst):
+            # Rewritten in place: Decky's watcher reacts to a modified file, not to one
+            # renamed over it.
+            with open(src, "rb") as f:
+                data = f.read()
+            with open(dst, "r+b") as f:
+                f.write(data)
+                f.truncate()
+            os.chmod(dst, mode)
+            continue
         tmp = dst + ".new"
         shutil.copyfile(src, tmp)
-        # Zips made on Windows carry no permission bits: the helper in bin/ must stay executable.
-        os.chmod(tmp, 0o755 if rel.startswith("bin/") else 0o644)
+        os.chmod(tmp, mode)
         os.replace(tmp, dst)
+
+
+def poke_decky():
+    """Decky handles file changes on its event loop: a request makes the reload happen now."""
+    try:
+        urllib.request.urlopen("http://127.0.0.1:1337/frontend/index.js", timeout=5).read(1)
+    except Exception:  # noqa: BLE001 - the reload still happens on Decky's next activity
+        pass
 
 
 if __name__ == "__main__":
@@ -158,6 +177,8 @@ if __name__ == "__main__":
     try:
         apply_update(new_root, target)
         print("update installed into", target)
+        time.sleep(1)
+        poke_decky()
     finally:
         shutil.rmtree(stage_dir, ignore_errors=True)
         if os.path.abspath(__file__).startswith("/tmp/"):
