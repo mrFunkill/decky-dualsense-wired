@@ -9,6 +9,7 @@ import decky
 
 from dualsense_bridge import Manager, remove_hide_rule
 from proton_prefixes import uninstall_all_detached
+from updater import Updater
 
 SETTINGS_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
 STEAM_ROOT = os.path.join(decky.DECKY_USER_HOME, ".local", "share", "Steam")
@@ -30,6 +31,7 @@ def save_settings(settings: dict):
 
 class Plugin:
     manager: Manager = None
+    updater: Updater = None
 
     # Current state: global toggle and the list of detected BT DualSense controllers.
     async def get_status(self) -> dict:
@@ -50,7 +52,20 @@ class Plugin:
         save_settings({**settings, "audio": {**settings.get("audio", {}), **options}})
         return self.manager.status()
 
+    # Updates from GitHub releases (the plugin is installed from a URL, so Decky does not update it).
+    async def check_update(self, force: bool = False) -> dict:
+        return await asyncio.to_thread(self.updater.check, force)
+
+    async def install_update(self) -> dict:
+        try:
+            version = await asyncio.to_thread(self.updater.install)
+            return {"ok": True, "version": version}
+        except Exception as e:  # noqa: BLE001 - shown in the panel
+            decky.logger.exception("Update failed")
+            return {"ok": False, "error": str(e)}
+
     async def _main(self):
+        self.updater = Updater("decky-dualsense-wired", decky.DECKY_PLUGIN_VERSION, decky.DECKY_PLUGIN_DIR, decky.logger)
         settings = load_settings()
         loop = asyncio.get_running_loop()
 

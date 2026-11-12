@@ -45,6 +45,18 @@ const en = {
   streamStats: (sent: number, underruns: number) => `packets ${sent} · gaps ${underruns}`,
 
   lowBattery: "DualSense: low battery",
+
+  updates: "Updates",
+  version: (v: string) => `Version ${v}`,
+  checkButton: "Check for updates",
+  checking: "Checking…",
+  checkFailed: "Could not check",
+  upToDate: "This is the latest version",
+  updateAvailable: (v: string) => `Update available: v${v}`,
+  updateDescription: "Downloads the release from GitHub. The controller reconnects: don't update during a game.",
+  updateButton: (v: string) => `Update to v${v}`,
+  updating: "Updating…",
+  updateFailed: "Update failed",
 };
 
 type Strings = typeof en;
@@ -93,6 +105,18 @@ const ru: Strings = {
   streamStats: (sent: number, underruns: number) => `пакетов ${sent} · пропусков ${underruns}`,
 
   lowBattery: "DualSense: низкий заряд",
+
+  updates: "Обновления",
+  version: (v: string) => `Версия ${v}`,
+  checkButton: "Проверить обновления",
+  checking: "Проверка…",
+  checkFailed: "Не удалось проверить",
+  upToDate: "Установлена последняя версия",
+  updateAvailable: (v: string) => `Доступно обновление: v${v}`,
+  updateDescription: "Загрузит релиз с GitHub. Контроллер переподключится: не обновляйте во время игры.",
+  updateButton: (v: string) => `Обновить до v${v}`,
+  updating: "Обновление…",
+  updateFailed: "Не удалось обновить",
 };
 
 // Steam client's localization; the first locale is the UI language ("russian", "english", ...).

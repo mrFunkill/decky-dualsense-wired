@@ -1,4 +1,5 @@
 import {
+  ButtonItem,
   Field,
   PanelSection,
   PanelSectionRow,
@@ -67,6 +68,68 @@ interface Status {
 const getStatus = callable<[], Status>("get_status");
 const setEnabled = callable<[enabled: boolean], Status>("set_enabled");
 const setAudio = callable<[options: Partial<AudioOptions>], Status>("set_audio");
+
+interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  available: boolean;
+  error?: string;
+}
+const checkUpdate = callable<[force: boolean], UpdateInfo>("check_update");
+const installUpdate = callable<[], { ok: boolean; version?: string; error?: string }>("install_update");
+
+/** Current version, a manual check against GitHub releases, and the update itself. */
+function UpdateSection() {
+  const [info, setInfo] = useState<UpdateInfo | undefined>();
+  const [state, setState] = useState<"idle" | "checking" | "updating" | "failed">("idle");
+  const [error, setError] = useState<string | undefined>();
+  const check = async (force: boolean) => {
+    setState("checking");
+    const result = await checkUpdate(force).catch((e) => ({ current: "", latest: null, available: false, error: String(e) }));
+    setInfo(result);
+    setState("idle");
+  };
+  useEffect(() => {
+    check(false);
+  }, []);
+  const s = t();
+  const status =
+    state === "checking" ? s.checking :
+    state === "failed" ? `${s.updateFailed}: ${error}` :
+    !info ? "" :
+    info.error ? `${s.checkFailed}: ${info.error}` :
+    info.available && info.latest ? s.updateAvailable(info.latest) :
+    info.latest ? s.upToDate : "";
+  return (
+    <PanelSection title={s.updates}>
+      <PanelSectionRow>
+        <Field label={info?.current ? s.version(info.current) : s.updates} description={status} />
+      </PanelSectionRow>
+      {info?.available && info.latest ? (
+        <PanelSectionRow>
+          <ButtonItem layout="below" disabled={state === "updating"} description={s.updateDescription}
+            onClick={async () => {
+              setState("updating");
+              // On success Decky reloads the plugin, and this panel with it.
+              const result = await installUpdate().catch((e) => ({ ok: false, error: String(e) }));
+              if (!result.ok) {
+                setError(result.error);
+                setState("failed");
+              }
+            }}>
+            {state === "updating" ? s.updating : s.updateButton(info.latest)}
+          </ButtonItem>
+        </PanelSectionRow>
+      ) : (
+        <PanelSectionRow>
+          <ButtonItem layout="below" disabled={state === "checking"} onClick={() => check(true)}>
+            {s.checkButton}
+          </ButtonItem>
+        </PanelSectionRow>
+      )}
+    </PanelSection>
+  );
+}
 
 function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Status) => void }) {
   const [audio, setLocal] = useState<AudioOptions>(status.audio);
@@ -218,6 +281,7 @@ function Content() {
         )}
       </PanelSection>
       <AudioSection status={status} onStatus={setStatus} />
+      <UpdateSection />
       {/* Keeps the last rows clear of the Quick Access Menu's bottom bar. */}
       <div style={{ height: "48px" }} />
     </>
