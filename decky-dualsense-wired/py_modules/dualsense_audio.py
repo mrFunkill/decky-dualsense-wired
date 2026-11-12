@@ -698,6 +698,7 @@ class AudioStreamer(threading.Thread):
             mic_sent = False
             now_ok = lambda until: time.monotonic() >= until  # noqa: E731
             last_tick = 0
+            qstat = []
             self.state = "active"
             self.log.info("Audio stream to %s started", self.hidraw_path)
             while not self._stop_event.is_set():
@@ -729,6 +730,8 @@ class AudioStreamer(threading.Thread):
                     if raw is not None and low and len(self._queue) >= 2:
                         raw2 = self._queue.popleft()
                     queued = len(self._queue)
+                if raw is not None:
+                    qstat.append(queued)
                 now = time.monotonic()
                 if (raw is not None and any(raw)) or (raw2 is not None and any(raw2)):
                     last_audible = now
@@ -750,12 +753,15 @@ class AudioStreamer(threading.Thread):
                         # Quiet while idle: one line per period only when audio was sent.
                         self.log.info(
                             "Audio stream: controller buffer %s ms, doubles %d, skipped %d, idle %d, "
-                            "underruns +%d, dropped +%d, stalls +%d, queue %d, max lateness %.1f ms",
+                            "underruns +%d, dropped +%d, stalls +%d, queue %s, max lateness %.1f ms",
                             ("%d..%d avg %d" % (min(levels), max(levels), sum(levels) / len(levels)))
                             if levels else "?",
                             counts["double"], counts["skip"], counts["idle"],
                             self.stats["underruns"] - last["underruns"], self.stats["dropped"] - last["dropped"],
-                            self.stats["stalls"] - last["stalls"], queued, max_late * 1000)
+                            self.stats["stalls"] - last["stalls"],
+                            ("%d..%d avg %.1f" % (min(qstat), max(qstat), sum(qstat) / len(qstat)))
+                            if qstat else str(queued), max_late * 1000)
+                    qstat = []
                     last_tick = tick
                     last = dict(self.stats)
                     levels = []

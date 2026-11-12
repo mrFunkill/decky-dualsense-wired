@@ -17,8 +17,15 @@ Helldivers 2 — speaker, HD haptics and adaptive triggers work without per-game
   HD haptics is sent to the controller over Bluetooth — like on a PC with a cable.
 - **All Deck audio to controller** (off by default). Instead of game audio, the controller speaker
   plays everything the Deck plays and haptics are derived from it — for games without DualSense support.
+- **Headphones in the controller jack**: when plugged in, the sound goes to them instead of the speaker.
+- **Controller microphone** (off by default): the controller's microphone, or a headset's, is
+  available to Steam, Discord and games. The controller's mute button mutes it and lights up.
+- **Fast triggers**: trigger effects and the lightbar are sent right away, not together with audio.
 - Speaker volume, haptics strength and the audio buffer (delay vs. robustness) are set in the
   plugin panel.
+- **Controller test**, a page opened from the plugin panel: buttons, sticks, gyro, touchpad,
+  rumble, adaptive triggers, lights, test sounds and HD haptics, microphone level and recording.
+  Everything goes through the virtual controller, like in a game.
 - **Updates**: a "Check for updates" button in the panel; the plugin downloads and installs the
   new version from GitHub.
 - Reconnecting the controller during a game keeps audio and triggers: the virtual controller waits
@@ -36,7 +43,7 @@ Requires [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
 1. In Decky: ⚙ **Settings → General** → turn on **Developer mode**.
 2. On the new **Developer** tab choose **Install Plugin from URL** and paste the link to the archive from
    the [latest release](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), e.g.
-   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.2/decky-dualsense-wired-v0.5.2.zip`.
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.3/decky-dualsense-wired-v0.5.3.zip`.
    Or download the archive to the Deck and choose **Install Plugin from ZIP File**.
 3. Confirm the installation. The plugin runs as root — this is needed for the virtual USB controller.
 4. Connect the DualSense over Bluetooth. In the game's properties **turn off Steam Input**.
@@ -61,9 +68,17 @@ The backend (`main.py`, `py_modules/`) runs as root (`root` flag in `plugin.json
    Every minute the plugin installs it into all Proton prefixes that are not running.
 4. **Streaming to the controller** (`dualsense_audio.py`). Audio is captured from the sink and encoded
    with Opus, haptics are sent at 3 kHz — in the DualSense's extended Bluetooth reports (`0x36`/`0x39`)
-   described in `research/FINDINGS.md`. Game output reports (triggers, lightbar) ride in the same stream.
+   described in `research/FINDINGS.md`. Game output reports (triggers, lightbar) go as separate reports
+   between the audio ones.
    Nothing is streamed while there is no sound: the Deck's Bluetooth shares the radio with Wi-Fi, and
    when the link congests BlueZ drops the input device.
+5. **Microphone** (`dualsense_mic.py`). The controller sends its voice as Opus frames in separate input
+   reports; the plugin decodes them into a PipeWire source `dualsense_mic_<port>` tied to the same
+   USB device as the sink.
+
+The stream fields (buffer length, microphone flag), the headphone jack and the voice report format were
+learned from the open [DS5Dongle](https://github.com/awalol/DS5Dongle) project (MIT); the code is
+written independently.
 
 Every Bluetooth DualSense gets its own virtual USB port (`dummy_hcd` is loaded with `num=4`): its own
 bus, Container ID and `dualsense_gadget_<port>` sink, so games pair the audio with the right
@@ -78,6 +93,8 @@ this mode if the virtual bus cannot be created.
 | udev rule hiding the original Bluetooth controller from Steam | `/etc/udev/rules.d/72-decky-dualsense-wired.rules` | when emulation is turned off and when the plugin unloads |
 | Kernel modules `dummy_hcd`, `libcomposite`, `usb_f_hid`, `usb_f_ss_lb`, `usb_f_uac2` | loaded when a virtual controller is created | stay loaded until reboot |
 | PipeWire sink `dualsense_gadget_<port>` | session of user `deck` | together with the virtual controller |
+| PipeWire source `dualsense_mic_<port>` and pipe `/run/user/<uid>/dualsense_mic_<port>.fifo` | session of user `deck` | when the microphone is turned off |
+| `hid-generic` instead of `hid-playstation` for the Bluetooth controller (the kernel's `ignore_special_drivers` is set briefly while binding) | `/sys/bus/hid` | when the microphone or emulation is turned off and when the plugin unloads |
 | Service `DualSenseWiredHelper` and `dualsense_wired_helper.exe` | every prefix `steamapps/compatdata/*/pfx` | when the plugin is uninstalled (prefixes running at that moment are skipped) |
 
 Prefix registries are only changed while the prefix is not running, keeping the file owner.
@@ -85,10 +102,9 @@ Prefix registries are only changed while the prefix is not running, keeping the 
 ## Limitations
 
 - Game audio and HD haptics for up to four controllers at once; only tested with one so far.
-- Headphones in the controller jack are not supported: over Bluetooth the sound always goes to the
-  controller speaker (the audio control byte does not switch the output, see `research/FINDINGS.md`).
-- The controller microphone is not supported: the protocol for audio from the controller over
-  Bluetooth is unknown (DSX does not have it either).
+- While the microphone is on, the Bluetooth controller is bound to `hid-generic` instead of
+  `hid-playstation`, which mistakes the microphone packets for mute button presses. Turning the
+  microphone on or off reconnects the controller once (games don't notice).
 - A newly installed game needs one launch to create its prefix; controller audio works from the
   second launch.
 - Some games use the DualSense only as an XInput controller (e.g. Hogwarts Legacy — on PC too);
