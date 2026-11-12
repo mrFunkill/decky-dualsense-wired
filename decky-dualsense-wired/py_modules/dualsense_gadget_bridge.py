@@ -26,7 +26,8 @@ import threading
 import time
 
 import dualsense_gadget as gadget
-from dualsense_audio import GAME_AUDIO_SINK, _pactl, get_feature, set_feature
+from dualsense_audio import GAME_AUDIO_SINK, _pactl, get_feature, is_mic_report, set_feature
+from dualsense_mic import MicSource
 from dualsense_bridge import (
     BT_FEATURE_REPORTS, BUS_BLUETOOTH, DS_FEATURE_REPORT_CALIBRATION, DS_FEATURE_REPORT_PAIRING_INFO,
     DS_INPUT_REPORT_USB, DS_OUTPUT_COMMON_SIZE, DS_OUTPUT_REPORT_USB, DS_USB_RDESC, DUALSENSE_PIDS,
@@ -48,9 +49,21 @@ def cleanup_stale(user):
     for name in gadget.our_gadgets():
         gadget.destroy(name)
     for line in _pactl(user, "list", "short", "modules").splitlines():
-        if "sink_name=" + GAME_AUDIO_SINK in line:
+        if "sink_name=" + GAME_AUDIO_SINK in line or "source_name=dualsense_mic" in line:
             _pactl(user, "unload-module", line.split()[0])
     gadget.ensure_dummy_hcd()
+
+
+def battery_from_status(status):
+    """Input report status byte -> battery like read_battery() (as hid-playstation computes it)."""
+    level, state = status & 0x0F, status >> 4
+    if state == 0x0:
+        return {"capacity": min(level * 10 + 5, 100), "status": "Discharging"}
+    if state == 0x1:
+        return {"capacity": min(level * 10 + 5, 100), "status": "Charging"}
+    if state == 0x2:
+        return {"capacity": 100, "status": "Full"}
+    return None
 
 
 def neutral_input(last):
@@ -114,6 +127,13 @@ class GadgetBridge(threading.Thread):
         self._last_direct = 0.0
         # Everything the game has set (triggers, LEDs ...), to restore it on a new connection.
         self._history = OutputState()
+        # Controller microphone: wanted by the Manager (panel switch), source made on the host side.
+        self.mic_enabled = False
+        # Battery from the input reports (hid-generic, used while the mic is on, has no power supply).
+        self.battery = None
+        self._mic = None
+        self._mic_busy = False
+        self._mic_retry_at = 0.0
 
     def stop(self):
         self._stop_event.set()
@@ -169,7 +189,8 @@ class GadgetBridge(threading.Thread):
             self.state = "stopped"
         except Exception as e:  # noqa: BLE001 - report any failure to the UI
             # Failing before the gadget worked means this backend is unusable here.
-            self.setup_failed = self.state not in ("active", "waiting")
+            # (The controller node vanishing at the start, e.g. a driver rebind, is not that.)
+            self.setup_failed = self.state not in ("active", "waiting") and not step.startswith("open ")
             self.state = "error"
             self.error = "%s: %s" % (step, e)
             self.log.exception("USB gadget bridge for %s failed at step '%s'", self.controller["hidraw"], step)
@@ -202,6 +223,9 @@ class GadgetBridge(threading.Thread):
         self.sink_ready = False
         if self._sink_thread:
             self._sink_thread.join(timeout=10)
+        if self._mic:
+            self._mic.stop()
+            self._mic = None
         if self._sink_module:
             _pactl(self.user, "unload-module", self._sink_module)
             self._sink_module = None
@@ -303,6 +327,29 @@ class GadgetBridge(threading.Thread):
         if self._expose_at and now >= self._expose_at[0]:
             self._expose_at.pop(0)
             self._expose(self._host)
+        if (self.sink_ready and not self._mic_busy and self.mic_enabled != (self._mic is not None)
+                and now >= self._mic_retry_at):
+            self._mic_busy = True
+            threading.Thread(target=self._switch_mic, args=(self.mic_enabled,), daemon=True,
+                             name=self.name + "-mic").start()
+
+    def _switch_mic(self, enable):
+        """Create or remove the microphone source (pactl takes a moment: not on the input path)."""
+        try:
+            if enable:
+                props = gadget.make_sink_properties(self._host["path"], pid=self.controller["pid"],
+                                                    description=DUALSENSE_PIDS[self.controller["pid"]])
+                mic = MicSource(self.sink_name.replace(GAME_AUDIO_SINK, "dualsense_mic"), props, self.user, self.log)
+                if mic.start():
+                    self._mic = mic
+                else:
+                    self._mic_retry_at = time.monotonic() + 30
+            elif self._mic:
+                mic, self._mic = self._mic, None
+                mic.stop()
+                self.log.info("Controller microphone source removed")
+        finally:
+            self._mic_busy = False
 
     # -- feature reports --
 
@@ -375,9 +422,17 @@ class GadgetBridge(threading.Thread):
     # -- controller side --
 
     def _handle_bt_report(self, report):
+        if is_mic_report(report):
+            # Microphone audio, not controller state (sent only while the mic flag is on).
+            mic = self._mic
+            if mic:
+                mic.feed(report)
+            return
         self.stats["bt_reports"] += 1
         usb = bt_input_to_usb(report)
         if usb:
+            if self._last_input is None or usb[53] != self._last_input[53]:
+                self.battery = battery_from_status(usb[53])
             self._last_input = usb
             try:
                 os.write(self._gfd, usb)
@@ -450,8 +505,10 @@ class GadgetBridge(threading.Thread):
                              "(dropped %d, host %s)", d["bt_reports"], STATS_INTERVAL, d["dropped_inputs"],
                              self.virtual_hidraw)
         else:
-            self.log.info("USB gadget: controller reports %d, delivered %d, dropped %d, outputs %d in %.0f s",
-                          d["bt_reports"], d["inputs"], d["dropped_inputs"], d["outputs"], STATS_INTERVAL)
+            mic = self._mic
+            self.log.info("USB gadget: controller reports %d, delivered %d, dropped %d, outputs %d in %.0f s%s",
+                          d["bt_reports"], d["inputs"], d["dropped_inputs"], d["outputs"], STATS_INTERVAL,
+                          "; mic frames %d (not taken %d) in total" % (mic.frames, mic.errors) if mic else "")
 
 
 def can_use_gadget(controller):

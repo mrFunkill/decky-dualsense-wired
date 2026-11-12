@@ -8,6 +8,7 @@ import os
 import decky
 
 from dualsense_bridge import Manager, remove_hide_rule
+from dualsense_tester import Tester
 from proton_prefixes import uninstall_all_detached
 from updater import Updater
 
@@ -32,6 +33,7 @@ def save_settings(settings: dict):
 class Plugin:
     manager: Manager = None
     updater: Updater = None
+    tester: Tester = None
 
     # Current state: global toggle and the list of detected BT DualSense controllers.
     async def get_status(self) -> dict:
@@ -64,6 +66,38 @@ class Plugin:
             decky.logger.exception("Update failed")
             return {"ok": False, "error": str(e)}
 
+    # Controller test page: works with the virtual controller like a game does.
+    async def tester_start(self) -> dict:
+        self.tester.start()
+        return self.tester.state()
+
+    async def tester_stop(self):
+        await asyncio.to_thread(self.tester.stop)
+
+    async def tester_state(self) -> dict:
+        return self.tester.state()
+
+    async def tester_action(self, action: str, args: dict) -> dict:
+        """One test action; returns {"ok": True} or {"ok": False, "error": ...} for the page."""
+        handlers = {
+            "rumble": lambda: self.tester.rumble(args.get("left", 0), args.get("right", 0)),
+            "trigger": lambda: self.tester.trigger(args.get("which", "both"), args["effect"]),
+            "lightbar": lambda: self.tester.lightbar(args["color"]),
+            "player_leds": lambda: self.tester.player_leds(args["mask"]),
+            "mute_led": lambda: self.tester.mute_led(args["mode"]),
+            "reset": lambda: self.tester.reset_outputs(),
+            "play": lambda: self.tester.play(args["sound"]),
+            "click_mode": lambda: self.tester.set_click_mode(args["on"]),
+            "capture": lambda: self.tester.set_capture(args["on"]),
+            "mic_record": lambda: self.tester.mic_record(),
+        }
+        try:
+            await asyncio.to_thread(handlers[action])
+            return {"ok": True}
+        except Exception as e:  # noqa: BLE001 - shown on the page
+            decky.logger.info("Test action %s failed: %s", action, e)
+            return {"ok": False, "error": str(e)}
+
     async def _main(self):
         self.updater = Updater("decky-dualsense-wired", decky.DECKY_PLUGIN_VERSION, decky.DECKY_PLUGIN_DIR, decky.logger)
         settings = load_settings()
@@ -77,9 +111,12 @@ class Plugin:
                                audio=settings.get("audio"), user=decky.DECKY_USER,
                                steam_root=STEAM_ROOT, notify_low_battery=notify_low_battery)
         self.manager.start()
+        self.tester = Tester(self.manager, decky.logger, user=decky.DECKY_USER)
         decky.logger.info("DualSense Wired started")
 
     async def _unload(self):
+        if self.tester:
+            await asyncio.to_thread(self.tester.stop)
         if self.manager:
             self.manager.shutdown()
         decky.logger.info("DualSense Wired stopped")

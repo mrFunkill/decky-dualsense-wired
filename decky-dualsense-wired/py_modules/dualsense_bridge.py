@@ -494,13 +494,47 @@ def pause_requested():
     return True
 
 
-def rebind_driver(hid_device):
-    """Unbind and bind hid-playstation, so the device nodes are re-created."""
-    if os.path.exists(os.path.join(PLAYSTATION_DRIVER, hid_device)):
-        with open(os.path.join(PLAYSTATION_DRIVER, "unbind"), "w") as f:
+HID_GENERIC_DRIVER = "/sys/bus/hid/drivers/hid-generic"
+HID_IGNORE_SPECIAL = "/sys/module/hid/parameters/ignore_special_drivers"
+
+
+def bound_driver(hid_device):
+    """Name of the HID driver bound to the device ("playstation", "hid-generic"), or None."""
+    link = os.path.join("/sys/bus/hid/devices", hid_device, "driver")
+    return os.path.basename(os.path.realpath(link)) if os.path.exists(link) else None
+
+
+def _unbind(hid_device):
+    driver = bound_driver(hid_device)
+    if driver:
+        with open(os.path.join("/sys/bus/hid/drivers", driver, "unbind"), "w") as f:
             f.write(hid_device)
-    with open(os.path.join(PLAYSTATION_DRIVER, "bind"), "w") as f:
-        f.write(hid_device)
+
+
+def rebind_driver(hid_device, generic=None):
+    """
+    Unbind and bind again, so the device nodes are re-created. generic: True for hid-generic,
+    False for hid-playstation, None for the driver it has now.
+    """
+    if generic is None:
+        generic = bound_driver(hid_device) == "hid-generic"
+    _unbind(hid_device)
+    if not generic:
+        with open(os.path.join(PLAYSTATION_DRIVER, "bind"), "w") as f:
+            f.write(hid_device)
+        return
+    # hid-generic refuses a device that has a special driver unless the HID core is told to
+    # ignore special drivers; only for this one bind.
+    with open(HID_IGNORE_SPECIAL) as f:
+        old = f.read().strip() or "0"
+    try:
+        with open(HID_IGNORE_SPECIAL, "w") as f:
+            f.write("1")
+        with open(os.path.join(HID_GENERIC_DRIVER, "bind"), "w") as f:
+            f.write(hid_device)
+    finally:
+        with open(HID_IGNORE_SPECIAL, "w") as f:
+            f.write(old)
 
 
 def return_to_steam(log):
@@ -514,7 +548,7 @@ def return_to_steam(log):
     remove_hide_rule()      # waits until udev applies it
     for c in find_dualsenses():
         try:
-            rebind_driver(c["hid_device"])
+            rebind_driver(c["hid_device"], generic=False)
         except OSError:
             log.exception("Failed to rebind %s", c["hid_device"])
             reapply_udev_rules(c["sys_path"])
@@ -987,6 +1021,11 @@ class Manager:
             streamers = list(self._streamers.values())
         for s in streamers:
             s.update(self._stream_options(s.options["source"], s.options.get("sink")))
+        with self._lock:
+            bridges = list(self._bridges.values())
+        for b in bridges:
+            if hasattr(b, "mic_enabled"):
+                b.mic_enabled = bool(self.audio.get("mic"))
         # Streams whose source changed are restarted, new ones started, by the next scan.
 
     def _stream_options(self, source="system", sink=None):
@@ -1104,7 +1143,7 @@ class Manager:
                     "connection": "bluetooth" if c["bus"] == BUS_BLUETOOTH else "usb",
                     "state": "idle", "error": None, "virtual_hidraw": None,
                 })
-            result[-1] = dict(result[-1], battery=read_battery(c["mac"]))
+            result[-1] = dict(result[-1], battery=self._battery(c, bridge))
         return {
             "enabled": self.enabled,
             "uhid_available": os.path.exists("/dev/uhid"),
@@ -1112,6 +1151,68 @@ class Manager:
             "audio": audio,
             "controllers": result,
         }
+
+    @staticmethod
+    def _battery(c, bridge):
+        # hid-generic (microphone on) has no power supply: the bridge reads it from the reports.
+        return read_battery(c["mac"]) or getattr(bridge, "battery", None)
+
+    def _sync_drivers(self):
+        """
+        While the controller microphone is on, Bluetooth DualSense controllers are bound to
+        hid-generic instead of hid-playstation. The microphone frames come as 0x31 input reports
+        too; hid-playstation parses their Opus data as buttons, sees the mute button "pressed"
+        dozens of times a second and toggles the controller's mute and its LED each time.
+        hid-generic passes the reports through untouched (the plugin handles the mute button).
+        Rebinding re-creates the hidraw node: the bridge re-attaches like after a reconnect.
+        Runs before the scan, so no bridge starts on a node that is about to go away.
+        """
+        want_generic = self.enabled and bool(self.audio.get("mic")) and not self._gadget_failed
+        for path in glob.glob("/sys/bus/hid/devices/0005:054C:*"):
+            hid_device = os.path.basename(path)
+            try:
+                pid = int(hid_device.split(":")[2].split(".")[0], 16)
+            except (IndexError, ValueError):
+                continue
+            if pid not in DUALSENSE_PIDS:
+                continue
+            driver = bound_driver(hid_device)
+            if driver is None:
+                generic = want_generic          # left without a driver (failed rebind): bind it
+            elif want_generic and driver == "playstation":
+                generic = True
+            elif not want_generic and driver == "hid-generic":
+                generic = False
+            else:
+                continue
+            if generic and not self._rule_installed:
+                # The new node must come up hidden: Steam powers a Bluetooth controller off
+                # when it sees it next to the virtual wired one.
+                continue
+            self.log.info("Binding %s to %s (controller microphone %s)", hid_device,
+                          "hid-generic" if generic else "hid-playstation", "on" if want_generic else "off")
+            # Rebinding is not "someone holds the node": don't re-bind it again for that.
+            self._rebound_at[hid_device] = time.monotonic()
+            try:
+                rebind_driver(hid_device, generic=generic)
+            except OSError:
+                self.log.exception("Rebinding %s failed", hid_device)
+                if bound_driver(hid_device) is None:
+                    try:
+                        rebind_driver(hid_device, generic=False)
+                    except OSError:
+                        pass
+
+    def tester_target(self):
+        """The controller the test page works with: the first one with a virtual controller."""
+        with self._lock:
+            bridges = list(self._bridges.items())
+            streamers = dict(self._streamers)
+        bridges.sort(key=lambda kb: getattr(kb[1], "mode", "") != "usb-gadget")
+        for key, bridge in bridges:
+            if bridge.is_alive() and bridge.state == "active" and bridge.virtual_hidraw:
+                return {"bridge": bridge, "streamer": streamers.get(key)}
+        return None
 
     def _stop_all(self):
         self._stop_streamers()
@@ -1130,8 +1231,10 @@ class Manager:
             return
         with self._lock:
             controllers = list(self._controllers)
+        with self._lock:
+            bridges = dict(self._bridges)
         for c in controllers:
-            battery = read_battery(c["mac"])
+            battery = self._battery(c, bridges.get(c["hidraw"]))
             if not battery:
                 continue
             warned = self._battery_warned.setdefault(c["mac"], set())
@@ -1158,6 +1261,7 @@ class Manager:
                     self._remove_rule()
                 os._exit(0)
             try:
+                self._sync_drivers()
                 self._scan()
                 self._sync_streamers()
                 self._check_batteries()
@@ -1247,5 +1351,7 @@ class Manager:
                      if getattr(b, "mode", "") == "usb-gadget" and b.is_alive())
         ports = len(glob.glob("/sys/class/udc/dummy_udc.*")) or dualsense_gadget.DUMMY_UDC_COUNT
         if not self._gadget_failed and in_use < ports and can_use_gadget(c):
-            return GadgetBridge(c, self.log, user=self.user)
+            bridge = GadgetBridge(c, self.log, user=self.user)
+            bridge.mic_enabled = bool(self.audio.get("mic"))
+            return bridge
         return Bridge(c, self.log)

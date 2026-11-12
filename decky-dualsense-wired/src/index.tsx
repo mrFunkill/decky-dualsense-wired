@@ -1,6 +1,7 @@
 import {
   ButtonItem,
   Field,
+  Navigation,
   PanelSection,
   PanelSectionRow,
   SliderField,
@@ -12,11 +13,13 @@ import {
   callable,
   definePlugin,
   removeEventListener,
+  routerHook,
   toaster,
 } from "@decky/api"
 import { useEffect, useRef, useState } from "react";
 import { FaPlaystation } from "react-icons/fa";
 import { t } from "./i18n";
+import { TEST_ROUTE, TestPage } from "./TestPage";
 
 interface AudioStreamStatus {
   state: "starting" | "active" | "stopped" | "error";
@@ -57,6 +60,7 @@ interface AudioOptions {
   haptics_gain: number;
   latency: number;       // ms of audio the controller keeps buffered
   separate_outputs: boolean;  // game output (triggers, LEDs) as its own reports
+  mic: boolean;               // controller microphone as a system audio source
 }
 
 interface Status {
@@ -212,6 +216,10 @@ function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Stat
             <ToggleField label={s.separateOutputs} description={s.separateOutputsDescription}
               checked={audio.separate_outputs} onChange={(value) => apply({ separate_outputs: value })} />
           </PanelSectionRow>
+          <PanelSectionRow>
+            <ToggleField label={s.mic} description={s.micDescription}
+              checked={audio.mic} onChange={(value) => apply({ mic: value })} />
+          </PanelSectionRow>
           {!bluetooth && (
             <PanelSectionRow>
               <Field label={s.noBluetooth} description={s.noBluetoothDescription} />
@@ -296,6 +304,17 @@ function Content() {
           ))
         )}
       </PanelSection>
+      <PanelSection>
+        <PanelSectionRow>
+          <ButtonItem layout="below" description={s.testButtonDescription}
+            onClick={() => {
+              Navigation.CloseSideMenus();
+              Navigation.Navigate(TEST_ROUTE);
+            }}>
+            {s.testButton}
+          </ButtonItem>
+        </PanelSectionRow>
+      </PanelSection>
       <AudioSection status={status} onStatus={setStatus} />
       <UpdateSection />
       {/* Keeps the last rows clear of the Quick Access Menu's bottom bar. */}
@@ -308,9 +327,11 @@ export default definePlugin(() => {
   // Steam shows no battery for the virtual wired controller; warn about a low one ourselves.
   const onLowBattery = addEventListener<[name: string, capacity: number]>("low_battery", (name, capacity) =>
     toaster.toast({ title: t().lowBattery, body: `${name}: ${capacity}%` }));
+  routerHook.addRoute(TEST_ROUTE, TestPage, { exact: true });
   return {
     onDismount() {
       removeEventListener("low_battery", onLowBattery);
+      routerHook.removeRoute(TEST_ROUTE);
     },
     // The name shown in various decky menus
     name: "DualSense Wired",

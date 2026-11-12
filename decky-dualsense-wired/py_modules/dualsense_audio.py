@@ -140,14 +140,55 @@ def build_report(report_id, seq, subpackets):
 LATENCY_MIN, LATENCY_MAX = 16, 64     # ms; the controller drops its whole buffer at ~64+
 
 
-def stream_header(counter, buffer_ms=48):
+STREAM_FLAG_MIC = 0x01         # stream header flag: the controller sends its microphone
+
+
+def is_mic_report(report):
+    """Bluetooth input report 0x31 carrying a microphone Opus frame instead of controller state."""
+    return len(report) > 2 and report[0] == 0x31 and bool(report[1] & 0x02)
+
+
+INPUT_MUTE_BUTTON = (11, 0x04)   # Bluetooth input report 0x31: the mute button
+
+
+def mic_mute_state(muted):
+    """
+    Common output part that (un)mutes the controller microphone and sets the mute button LED.
+    Over a cable the host does this when the mute button is pressed: the controller only reports
+    the press. Also sets the microphone volume and automatic mic selection (headset mic first).
+    """
+    common = bytearray(47)
+    common[0] = 0x40 | 0x80          # microphone volume, audio control
+    common[1] = 0x01 | 0x02          # mute LED, mute control
+    common[6] = 0x40                 # microphone volume (the controller tops out at ~64)
+    common[7] = 0x08                 # audio control: mic auto select, noise cancelling
+    common[8] = 0x01 if muted else 0x00   # mute LED on / off
+    common[9] = 0x10 if muted else 0x00   # mute control: microphone muted, no power saving
+    return bytes(common)
+
+
+def mute_led_state(on):
+    """Mute button LED only (turned off with the microphone)."""
+    common = bytearray(47)
+    common[1] = 0x01
+    common[8] = 0x01 if on else 0x00
+    return bytes(common)
+
+
+def mic_status_report(seq, enabled):
+    """Turns the controller microphone on/off without audio (a header-only 0x32 report)."""
+    return build_report(0x32, seq, [(SUB_STREAM, [bytes([0x03 if enabled else 0x02])])])
+
+
+def stream_header(counter, buffer_ms=48, mic=False):
     """
     0x11 block: flags, then the controller's audio buffer length in ms (DSX sends 0x30 = 48;
     the fields were identified in the open DS5Dongle project), then a packet counter. The
     controller keeps this much audio queued: less means less delay, more means fewer gaps.
     """
     b = max(LATENCY_MIN, min(LATENCY_MAX, int(buffer_ms)))
-    return bytes([0xFE, b, b, b, b, b, counter & 0xFF])
+    flags = 0xFE | (STREAM_FLAG_MIC if mic else 0)
+    return bytes([flags, b, b, b, b, b, counter & 0xFF])
 
 
 def haptics_block(samples):
@@ -194,6 +235,15 @@ class OpusEncoder:
             raise OSError("opus_encode failed: %d" % n)
         return bytes(self._out[:n])
 
+    def encode_float(self, pcm):
+        """pcm: array('f') of 960 interleaved floats (480 stereo frames), nominally -1..1."""
+        self.lib.opus_encode_float.restype = ctypes.c_int32
+        buf = (ctypes.c_float * len(pcm)).from_buffer(pcm)
+        n = self.lib.opus_encode_float(ctypes.c_void_p(self.enc), buf, OPUS_FRAME_SAMPLES, self._out, len(self._out))
+        if n < 0:
+            raise OSError("opus_encode failed: %d" % n)
+        return bytes(self._out[:n])
+
     def reset(self):
         """Start over as for a new stream (the controller's decoder starts fresh too)."""
         self.lib.opus_encoder_ctl(ctypes.c_void_p(self.enc), self.OPUS_RESET_STATE)
@@ -209,6 +259,34 @@ class OpusEncoder:
     def __del__(self):
         if getattr(self, "enc", None):
             self.lib.opus_encoder_destroy(ctypes.c_void_p(self.enc))
+
+
+class OpusDecoder:
+    """Minimal libopus decoder binding (the controller microphone: 48 kHz mono, 10 ms frames)."""
+
+    def __init__(self, rate=48000, channels=1, max_samples=960):
+        self.lib = ctypes.CDLL("libopus.so.0")
+        self.lib.opus_decoder_create.restype = ctypes.c_void_p
+        self.lib.opus_decode.restype = ctypes.c_int32
+        err = ctypes.c_int()
+        self.dec = self.lib.opus_decoder_create(rate, channels, ctypes.byref(err))
+        if err.value != 0 or not self.dec:
+            raise OSError("opus_decoder_create failed: %d" % err.value)
+        self.channels = channels
+        self.max_samples = max_samples
+        self._out = (ctypes.c_int16 * (max_samples * channels))()
+
+    def decode(self, packet):
+        """One Opus packet -> s16le PCM bytes."""
+        buf = (ctypes.c_ubyte * len(packet)).from_buffer_copy(packet)
+        n = self.lib.opus_decode(ctypes.c_void_p(self.dec), buf, len(packet), self._out, self.max_samples, 0)
+        if n < 0:
+            raise OSError("opus_decode failed: %d" % n)
+        return bytes(self._out)[:n * self.channels * 2]
+
+    def __del__(self):
+        if getattr(self, "dec", None):
+            self.lib.opus_decoder_destroy(ctypes.c_void_p(self.dec))
 
 
 # --- device access -----------------------------------------------------------------
@@ -266,6 +344,7 @@ DEFAULT_STREAM_OPTIONS = {
     "haptics_gain": 100,    # haptics strength, 0..300 %
     "latency": 32,          # audio kept buffered in the controller, ms (DSX uses 48)
     "separate_outputs": True,  # game output (triggers, LEDs) as its own reports, not inside audio ones
+    "mic": False,           # controller microphone as a system audio source
     "source": "system",     # "system": what the Deck plays; "controller": GAME_AUDIO_SINK
 }
 
@@ -282,7 +361,12 @@ GAME_HAPTICS_LOWPASS_HZ = 1200.0
 # resampled to 45 kHz by PipeWire and the Opus encoder is simply fed 480-sample frames.
 CONTROLLER_AUDIO_RATE = 45000
 STREAM_PERIOD = OPUS_FRAME_SAMPLES / CONTROLLER_AUDIO_RATE      # 10.667 ms
-PCM_FRAME_BYTES = OPUS_FRAME_SAMPLES * 2 * 2   # 480 stereo s16 frames
+PCM_FRAME_BYTES = OPUS_FRAME_SAMPLES * 2 * 4   # 480 stereo float frames
+# Capture is float: PipeWire mixes in float and the sink monitor has no volume applied, so
+# several sounds together go above full scale. As s16 that was clipped hard (a hoarse sound
+# whenever a new sound started over loud music); now a limiter lowers the gain smoothly.
+LIMIT_PEAK = 0.97
+LIMIT_RELEASE = 0.02           # gain recovery per 10.7 ms frame (~0.5 s from half gain)
 HAPTICS_DECIMATION = OPUS_FRAME_SAMPLES // HAPTICS_FRAMES  # 45 kHz / 15 = 3 kHz haptics
 HAPTICS_LOWPASS_HZ = 400.0
 # PipeWire delivers capture in quantum-sized bursts (512 frames idle, up to 2048 under
@@ -328,7 +412,7 @@ class AudioStreamer(threading.Thread):
         # The source is fixed for the life of the stream (it sets the capture format).
         self.game_audio = self.options["source"] == "controller"
         self.channels = 4 if self.game_audio else 2
-        self.frame_bytes = OPUS_FRAME_SAMPLES * self.channels * 2
+        self.frame_bytes = OPUS_FRAME_SAMPLES * self.channels * 4
         from dualsense_bridge import OutputState
         # Game output reports (rumble, triggers, LEDs) ride in the stream's settings block,
         # so the controller gets one steady stream: separate reports on top of ~94 audio
@@ -336,6 +420,9 @@ class AudioStreamer(threading.Thread):
         self._game_output = OutputState()
         self._game_audio_control = None
         self._headphones = False
+        self._mute_pressed = False
+        self._mic_muted = False
+        self._mic_state_pending = False
         self._logged_outputs = 0
         self._stop_event = threading.Event()
         self._queue = collections.deque()
@@ -351,6 +438,11 @@ class AudioStreamer(threading.Thread):
 
     def submit_output(self, common):
         """Queue the common part (47 bytes) of a game output report for the next report."""
+        if self.options.get("mic") and common[1] & 0x03:
+            # The plugin owns the microphone mute and its LED (the mute button toggles them);
+            # hid-playstation on the virtual controller would toggle them a second time.
+            common = bytearray(common)
+            common[1] &= ~0x03 & 0xFF
         self._game_output.update(common)
 
     def _settings(self, volume):
@@ -360,6 +452,8 @@ class AudioStreamer(threading.Thread):
             # The audio fields repeat in every audio report: keep the game's audio routing.
             if self._game_audio_control is not None:
                 block[7] = self._game_audio_control
+            elif self.options.get("mic"):
+                block[7] = 0x08     # microphone: automatic selection (a headset mic when plugged in)
             return bytes(block)
         game = self._game_output.take()
         if game:
@@ -375,6 +469,22 @@ class AudioStreamer(threading.Thread):
             block[4] = block[5] = volume
             block[7] = audio_control
         return bytes(block)
+
+    def _mic_controls(self, fd, seq, mic):
+        """
+        The host owns the microphone mute state, like hid-playstation over a cable: the mute
+        button toggles it, the LED shows it. The controller's own status bit (input byte 55
+        bit 2) is no use here: with the microphone streaming over Bluetooth it flips ~50 times
+        a second, and mirroring it made the LED flicker.
+        """
+        from dualsense_bridge import common_to_bt
+        if self._mic_state_pending:
+            self._mic_state_pending = False
+            self._write(fd, common_to_bt(mic_mute_state(self._mic_muted) if mic else mute_led_state(False), seq))
+            seq += 1
+            if mic:
+                self.log.info("Controller microphone %s", "muted" if self._mic_muted else "live")
+        return seq
 
     def _opus_block(self):
         return SUB_OPUS_HEADPHONES if self._headphones else SUB_OPUS
@@ -418,7 +528,7 @@ class AudioStreamer(threading.Thread):
         import pwd
         pw = pwd.getpwnam(self.user)
         cmd = ["pw-record", "--raw", "--rate", str(CONTROLLER_AUDIO_RATE), "--channels", str(self.channels),
-               "--format", "s16", "--quality", "10", "--latency", "20ms",
+               "--format", "f32", "--quality", "10", "--latency", "20ms",
                "-P", "{ stream.capture.sink = true node.name = decky-dualsense-audio }"]
         if self.game_audio:
             # Monitor of the controller's sink, channels in the device's own order (no remix).
@@ -461,7 +571,7 @@ class AudioStreamer(threading.Thread):
 
     def _haptics_from_pcm(self, pcm, state):
         """Decimate 48 kHz stereo to 32 frames, low-pass, apply gain -> 64-byte haptics block."""
-        gain = self.options["haptics_gain"] / 100.0 / 32768.0
+        gain = self.options["haptics_gain"] / 100.0
         alpha = state["alpha"]
         out = bytearray(HAPTICS_BLOCK)
         for ch in (0, 1):
@@ -500,8 +610,13 @@ class AudioStreamer(threading.Thread):
                 report = os.read(fd, 128)
             except BlockingIOError:
                 return level
-            if len(report) == 78 and report[0] == 0x31:
+            if len(report) == 78 and report[0] == 0x31 and not is_mic_report(report):
                 level = report[INPUT_AUDIO_LEVEL_OFFSET]
+                pressed = bool(report[INPUT_MUTE_BUTTON[0]] & INPUT_MUTE_BUTTON[1])
+                if pressed and not self._mute_pressed and self.options.get("mic"):
+                    self._mic_muted = not self._mic_muted
+                    self._mic_state_pending = True
+                self._mute_pressed = pressed
                 headphones = bool(report[INPUT_PLUG_OFFSET] & 0x01)
                 if headphones != self._headphones:
                     self._headphones = headphones
@@ -522,14 +637,32 @@ class AudioStreamer(threading.Thread):
 
             def split(raw):
                 """4-channel frames -> (speaker stereo, haptics stereo); stereo -> same for both."""
-                pcm = array.array("h", raw)
+                pcm = array.array("f", raw)
                 if self.channels == 2:
-                    return pcm, pcm
-                speaker = array.array("h", bytes(OPUS_FRAME_SAMPLES * 4))
-                haptics = array.array("h", bytes(OPUS_FRAME_SAMPLES * 4))
+                    return pcm, array.array("f", pcm)
+                speaker = array.array("f", bytes(OPUS_FRAME_SAMPLES * 8))
+                haptics = array.array("f", bytes(OPUS_FRAME_SAMPLES * 8))
                 speaker[0::2], speaker[1::2] = pcm[0::4], pcm[1::4]
                 haptics[0::2], haptics[1::2] = pcm[2::4], pcm[3::4]
                 return speaker, haptics
+
+            limiter = {"gain": 1.0}
+
+            def limit(pcm):
+                """Peak limiter: instant attack, slow release; in place."""
+                peak = max(max(pcm), -min(pcm))
+                prev = limiter["gain"]
+                target = min(1.0, LIMIT_PEAK / peak) if peak > 0 else 1.0
+                gain = target if target < prev else min(target, prev + LIMIT_RELEASE)
+                limiter["gain"] = gain
+                if gain < 1.0:
+                    n = len(pcm)
+                    if gain > prev:      # releasing: ramp to avoid a step
+                        for i in range(n):
+                            pcm[i] *= prev + (gain - prev) * i / n
+                    else:
+                        for i in range(n):
+                            pcm[i] *= gain
 
             def encode(raw):
                 if raw is None:
@@ -540,7 +673,8 @@ class AudioStreamer(threading.Thread):
                 # Silence is encoded too while the stream runs: an encoder that skipped frames
                 # continues from stale state when sound comes back, heard as a squeak.
                 if opts["speaker"]:
-                    opus = encoder.encode_raw(speaker.tobytes())
+                    limit(speaker)
+                    opus = encoder.encode_float(speaker)
                 haptics = silent_haptics
                 if opts["haptics"] and any(haptics_pcm):
                     haptics = self._haptics_from_pcm(haptics_pcm, hstate)
@@ -561,11 +695,24 @@ class AudioStreamer(threading.Thread):
             max_late = 0.0
             last_audible = -STREAM_HOLD
             was_idle = True
+            mic_sent = False
+            now_ok = lambda until: time.monotonic() >= until  # noqa: E731
             last_tick = 0
             self.state = "active"
             self.log.info("Audio stream to %s started", self.hidraw_path)
             while not self._stop_event.is_set():
                 level = self._read_level(fd, level)
+                mic = bool(self.options.get("mic"))
+                if mic != mic_sent and now_ok(self._backoff_until):
+                    # Audio reports carry the flag too; this covers silence (no audio reports).
+                    self._write(fd, mic_status_report(seq, mic))
+                    seq += 1
+                    mic_sent = mic
+                    self._mic_muted = False
+                    self._mic_state_pending = True
+                    self.log.info("Controller microphone %s", "on" if mic else "off")
+                if now_ok(self._backoff_until):
+                    seq = self._mic_controls(fd, seq, mic)
                 if level is not None:
                     levels.append(level)
                     smoothed = level if smoothed is None else smoothed + LEVEL_SMOOTHING * (level - smoothed)
@@ -631,7 +778,7 @@ class AudioStreamer(threading.Thread):
                 elif raw2 is not None:
                     last_adjust = tick
                     (o1, h1), (o2, h2) = encode(raw), encode(raw2)
-                    report = build_report(0x39, seq, [(SUB_STREAM, [stream_header(seq, self.options["latency"])]),
+                    report = build_report(0x39, seq, [(SUB_STREAM, [stream_header(seq, self.options["latency"], self.options.get("mic"))]),
                                                       (self._opus_block(), [o1, o2]), (SUB_HAPTICS, [h1, h2])])
                     self._write(fd, report)
                     counts["double"] += 1
@@ -642,7 +789,7 @@ class AudioStreamer(threading.Thread):
                     settings = self._settings(volume)
                     opus, haptics = encode(raw)
                     report = build_report(0x36, seq, [
-                        (SUB_SETTINGS, [settings]), (SUB_STREAM, [stream_header(seq, self.options["latency"])]),
+                        (SUB_SETTINGS, [settings]), (SUB_STREAM, [stream_header(seq, self.options["latency"], self.options.get("mic"))]),
                         (self._opus_block(), [opus]), (SUB_HAPTICS, [haptics])])
                     self._write(fd, report)
                     seq += 1
@@ -659,9 +806,11 @@ class AudioStreamer(threading.Thread):
             self.stop()
             if fd >= 0:
                 try:
-                    # Leave the controller silent.
+                    # Leave the controller silent, its microphone off.
                     os.write(fd, build_report(0x32, 0, [(SUB_SETTINGS, [settings_block(flags=AUDIO_ONLY_FLAGS)]),
                                                         (SUB_HAPTICS, [bytes(HAPTICS_BLOCK)])]))
+                    if self.options.get("mic"):
+                        os.write(fd, mic_status_report(1, False))
                 except OSError:
                     pass
                 os.close(fd)
