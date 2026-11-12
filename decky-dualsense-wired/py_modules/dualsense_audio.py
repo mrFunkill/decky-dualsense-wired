@@ -263,6 +263,7 @@ DEFAULT_STREAM_OPTIONS = {
     "volume": 80,           # controller speaker/headset volume, 0..100
     "haptics_gain": 100,    # haptics strength, 0..300 %
     "latency": 32,          # audio kept buffered in the controller, ms (DSX uses 48)
+    "separate_outputs": True,  # game output (triggers, LEDs) as its own reports, not inside audio ones
     "source": "system",     # "system": what the Deck plays; "controller": GAME_AUDIO_SINK
 }
 
@@ -331,6 +332,7 @@ class AudioStreamer(threading.Thread):
         # so the controller gets one steady stream: separate reports on top of ~94 audio
         # reports/s overflow BlueZ's socket, and BlueZ then drops the HID device.
         self._game_output = OutputState()
+        self._game_audio_control = None
         self._logged_outputs = 0
         self._stop_event = threading.Event()
         self._queue = collections.deque()
@@ -351,6 +353,11 @@ class AudioStreamer(threading.Thread):
     def _settings(self, volume):
         """Settings block: audio fields from the plugin, everything else from the game."""
         block = bytearray(settings_block(speaker_volume=volume, headset_volume=volume, flags=AUDIO_ONLY_FLAGS))
+        if self.options.get("separate_outputs"):
+            # The audio fields repeat in every audio report: keep the game's audio routing.
+            if self._game_audio_control is not None:
+                block[7] = self._game_audio_control
+            return bytes(block)
         game = self._game_output.take()
         if game:
             masked = (game[0] & STREAM_BLOCKED_FLAG0, game[1] & STREAM_BLOCKED_FLAG1)
@@ -365,6 +372,30 @@ class AudioStreamer(threading.Thread):
             block[4] = block[5] = volume
             block[7] = audio_control
         return bytes(block)
+
+    def _send_game_output(self, fd, seq):
+        """
+        Game output as its own 0x31 report, right after an audio report: inside an audio report
+        the controller seems to apply it only when that audio plays, a buffer later. At most one
+        per audio report, so the link carries no more than twice the audio report rate.
+        Returns the next sequence number.
+        """
+        if not self.options.get("separate_outputs"):
+            return seq
+        game = self._game_output.take()
+        if not game:
+            return seq
+        game = bytearray(game)
+        if game[0] & 0x80:
+            self._game_audio_control = game[7]
+        # Same rule as inside the stream: no "rumble instead of haptics", no LED release.
+        game[0] &= ~STREAM_BLOCKED_FLAG0 & 0xFF
+        game[1] &= ~STREAM_BLOCKED_FLAG1 & 0xFF
+        if not (game[0] or game[1] or game[38]):
+            return seq
+        from dualsense_bridge import common_to_bt
+        self._write(fd, common_to_bt(bytes(game), seq))
+        return seq + 1
 
     def stop(self):
         self._stop_event.set()
@@ -585,6 +616,7 @@ class AudioStreamer(threading.Thread):
                 elif raw is not None and high:
                     counts["skip"] += 1           # controller has too much queued: drop this frame
                     last_adjust = tick
+                    seq = self._send_game_output(fd, seq)
                 elif raw2 is not None:
                     last_adjust = tick
                     (o1, h1), (o2, h2) = encode(raw), encode(raw2)
@@ -593,6 +625,7 @@ class AudioStreamer(threading.Thread):
                     self._write(fd, report)
                     counts["double"] += 1
                     seq += 1
+                    seq = self._send_game_output(fd, seq)
                 else:
                     volume = max(0, min(0x7F, round(self.options["volume"] * 0x7F / 100)))
                     settings = self._settings(volume)
@@ -602,6 +635,7 @@ class AudioStreamer(threading.Thread):
                         (SUB_OPUS, [opus]), (SUB_HAPTICS, [haptics])])
                     self._write(fd, report)
                     seq += 1
+                    seq = self._send_game_output(fd, seq)
                 self.stats["sent"] += 1
                 tick += 1
                 _pace(start, tick, period)

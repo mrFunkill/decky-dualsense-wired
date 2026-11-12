@@ -56,6 +56,7 @@ interface AudioOptions {
   volume: number;
   haptics_gain: number;
   latency: number;       // ms of audio the controller keeps buffered
+  separate_outputs: boolean;  // game output (triggers, LEDs) as its own reports
 }
 
 interface Status {
@@ -206,6 +207,10 @@ function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Stat
             <SliderField label={s.latency} description={s.latencyDescription} value={audio.latency}
               min={16} max={64} step={8} showValue valueSuffix={s.ms}
               onChange={(value) => apply({ latency: value }, true)} />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ToggleField label={s.separateOutputs} description={s.separateOutputsDescription}
+              checked={audio.separate_outputs} onChange={(value) => apply({ separate_outputs: value })} />
           </PanelSectionRow>
           {!bluetooth && (
             <PanelSectionRow>
