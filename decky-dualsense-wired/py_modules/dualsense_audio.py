@@ -135,8 +135,17 @@ def build_report(report_id, seq, subpackets):
     return bytes(out)
 
 
-def stream_header(counter):
-    return bytes([0xFE, 0x30, 0x30, 0x30, 0x30, 0x30, counter & 0xFF])
+LATENCY_MIN, LATENCY_MAX = 16, 64     # ms; the controller drops its whole buffer at ~64+
+
+
+def stream_header(counter, buffer_ms=48):
+    """
+    0x11 block: flags, then the controller's audio buffer length in ms (DSX sends 0x30 = 48;
+    the fields were identified in the open DS5Dongle project), then a packet counter. The
+    controller keeps this much audio queued: less means less delay, more means fewer gaps.
+    """
+    b = max(LATENCY_MIN, min(LATENCY_MAX, int(buffer_ms)))
+    return bytes([0xFE, b, b, b, b, b, counter & 0xFF])
 
 
 def haptics_block(samples):
@@ -160,6 +169,7 @@ class OpusEncoder:
     OPUS_APPLICATION_RESTRICTED_LOWDELAY = 2051
     OPUS_SET_BITRATE = 4002
     OPUS_SET_VBR = 4006
+    OPUS_RESET_STATE = 4028
 
     def __init__(self, bitrate=160000):
         self.lib = ctypes.CDLL("libopus.so.0")
@@ -181,6 +191,10 @@ class OpusEncoder:
         if n < 0:
             raise OSError("opus_encode failed: %d" % n)
         return bytes(self._out[:n])
+
+    def reset(self):
+        """Start over as for a new stream (the controller's decoder starts fresh too)."""
+        self.lib.opus_encoder_ctl(ctypes.c_void_p(self.enc), self.OPUS_RESET_STATE)
 
     def encode_raw(self, raw):
         """raw: 1920 bytes of s16le interleaved stereo (480 frames), as read from pw-record."""
@@ -248,7 +262,7 @@ DEFAULT_STREAM_OPTIONS = {
     "haptics": True,        # derive haptics from the same audio
     "volume": 80,           # controller speaker/headset volume, 0..100
     "haptics_gain": 100,    # haptics strength, 0..300 %
-    "latency": 48,          # audio kept buffered in the controller, ms (DSX default)
+    "latency": 32,          # audio kept buffered in the controller, ms (DSX uses 48)
     "source": "system",     # "system": what the Deck plays; "controller": GAME_AUDIO_SINK
 }
 
@@ -279,8 +293,8 @@ STREAM_STATS_PERIOD = 5.0
 # "Playback Buffer Latency" of 48 ms (capture 02-dsx-start). The stream keeps it near the
 # target: two frames in one 0x39 report when low, a skipped frame when high.
 INPUT_AUDIO_LEVEL_OFFSET = 65
-DEFAULT_TARGET_LEVEL = 48
-LEVEL_LOW_MARGIN = 16
+DEFAULT_TARGET_LEVEL = 32
+LEVEL_LOW_MARGIN = 12
 LEVEL_HIGH_MARGIN = 12        # the controller drops its whole buffer at ~64+
 LEVEL_SMOOTHING = 0.05        # EMA per report
 LEVEL_ADJUST_INTERVAL = 20    # reports between corrections (~200 ms)
@@ -476,12 +490,14 @@ class AudioStreamer(threading.Thread):
                 return speaker, haptics
 
             def encode(raw):
-                if raw is None or not any(raw):
+                if raw is None:
                     return pad_opus(OPUS_SILENCE), silent_haptics
                 opts = self.options
                 speaker, haptics_pcm = split(raw)
                 opus = OPUS_SILENCE
-                if opts["speaker"] and any(speaker):
+                # Silence is encoded too while the stream runs: an encoder that skipped frames
+                # continues from stale state when sound comes back, heard as a squeak.
+                if opts["speaker"]:
                     opus = encoder.encode_raw(speaker.tobytes())
                 haptics = silent_haptics
                 if opts["haptics"] and any(haptics_pcm):
@@ -502,6 +518,7 @@ class AudioStreamer(threading.Thread):
             last = dict(self.stats)
             max_late = 0.0
             last_audible = -STREAM_HOLD
+            was_idle = True
             last_tick = 0
             self.state = "active"
             self.log.info("Audio stream to %s started", self.hidraw_path)
@@ -527,6 +544,11 @@ class AudioStreamer(threading.Thread):
                 if (raw is not None and any(raw)) or (raw2 is not None and any(raw2)):
                     last_audible = now
                 idle = now - last_audible > STREAM_HOLD or now < self._backoff_until
+                if was_idle and not idle:
+                    # A new stream after a pause: the encoder and the haptics filter start clean.
+                    encoder.reset()
+                    hstate["y"] = [0.0, 0.0]
+                was_idle = idle
                 if primed and raw is None and not idle:
                     self.stats["underruns"] += 1
                     primed = False
@@ -566,7 +588,7 @@ class AudioStreamer(threading.Thread):
                 elif raw2 is not None:
                     last_adjust = tick
                     (o1, h1), (o2, h2) = encode(raw), encode(raw2)
-                    report = build_report(0x39, seq, [(SUB_STREAM, [stream_header(seq)]),
+                    report = build_report(0x39, seq, [(SUB_STREAM, [stream_header(seq, self.options["latency"])]),
                                                       (SUB_OPUS, [o1, o2]), (SUB_HAPTICS, [h1, h2])])
                     self._write(fd, report)
                     counts["double"] += 1
@@ -576,7 +598,7 @@ class AudioStreamer(threading.Thread):
                     settings = self._settings(volume)
                     opus, haptics = encode(raw)
                     report = build_report(0x36, seq, [
-                        (SUB_SETTINGS, [settings]), (SUB_STREAM, [stream_header(seq)]),
+                        (SUB_SETTINGS, [settings]), (SUB_STREAM, [stream_header(seq, self.options["latency"])]),
                         (SUB_OPUS, [opus]), (SUB_HAPTICS, [haptics])])
                     self._write(fd, report)
                     seq += 1

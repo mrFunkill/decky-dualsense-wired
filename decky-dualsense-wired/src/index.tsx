@@ -55,6 +55,7 @@ interface AudioOptions {
   haptics: boolean;
   volume: number;
   haptics_gain: number;
+  latency: number;       // ms of audio the controller keeps buffered
 }
 
 interface Status {
@@ -195,6 +196,11 @@ function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Stat
             <SliderField label={s.hapticsGain} value={audio.haptics_gain} min={0} max={300} step={10}
               showValue valueSuffix="%" disabled={!audio.haptics}
               onChange={(value) => apply({ haptics_gain: value }, true)} />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <SliderField label={s.latency} description={s.latencyDescription} value={audio.latency}
+              min={16} max={64} step={8} showValue valueSuffix={s.ms}
+              onChange={(value) => apply({ latency: value }, true)} />
           </PanelSectionRow>
           {!bluetooth && (
             <PanelSectionRow>

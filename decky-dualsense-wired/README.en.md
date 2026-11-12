@@ -17,7 +17,10 @@ Helldivers 2 — speaker, HD haptics and adaptive triggers work without per-game
   HD haptics is sent to the controller over Bluetooth — like on a PC with a cable.
 - **All Deck audio to controller** (off by default). Instead of game audio, the controller speaker
   plays everything the Deck plays and haptics are derived from it — for games without DualSense support.
-- Speaker volume and haptics strength are set in the plugin panel.
+- Speaker volume, haptics strength and the audio buffer (delay vs. robustness) are set in the
+  plugin panel.
+- **Updates**: a "Check for updates" button in the panel; the plugin downloads and installs the
+  new version from GitHub.
 - Reconnecting the controller during a game keeps audio and triggers: the virtual controller waits
   2 minutes for it to come back.
 - Controller battery is shown in the plugin panel, with Steam notifications at 20% and 10%: Steam shows
@@ -33,7 +36,7 @@ Requires [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
 1. In Decky: ⚙ **Settings → General** → turn on **Developer mode**.
 2. On the new **Developer** tab choose **Install Plugin from URL** and paste the link to the archive from
    the [latest release](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), e.g.
-   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.1/decky-dualsense-wired-v0.5.1.zip`.
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.2/decky-dualsense-wired-v0.5.2.zip`.
    Or download the archive to the Deck and choose **Install Plugin from ZIP File**.
 3. Confirm the installation. The plugin runs as root — this is needed for the virtual USB controller.
 4. Connect the DualSense over Bluetooth. In the game's properties **turn off Steam Input**.
