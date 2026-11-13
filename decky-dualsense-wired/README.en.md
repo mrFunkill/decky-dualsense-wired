@@ -25,7 +25,11 @@ Helldivers 2 — speaker, HD haptics and adaptive triggers work without per-game
   plugin panel.
 - **Controller test**, a page opened from the plugin panel: buttons, sticks, gyro, touchpad,
   rumble, adaptive triggers, lights, test sounds and HD haptics, microphone level and recording.
-  Everything goes through the virtual controller, like in a game.
+  Everything goes through the virtual controller, like in a game. With several controllers you pick
+  the one to test.
+- **Bug report**: the "Collect logs" button saves the plugin logs and system details as a zip in
+  `~/Downloads` (MAC addresses masked). Attach it to an
+  [issue](https://github.com/mrFunkill/decky-dualsense-wired/issues).
 - **Updates**: a "Check for updates" button in the panel; the plugin downloads and installs the
   new version from GitHub.
 - Reconnecting the controller during a game keeps audio and triggers: the virtual controller waits
@@ -43,7 +47,7 @@ Requires [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
 1. In Decky: ⚙ **Settings → General** → turn on **Developer mode**.
 2. On the new **Developer** tab choose **Install Plugin from URL** and paste the link to the archive from
    the [latest release](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), e.g.
-   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.3/decky-dualsense-wired-v0.5.3.zip`.
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.4/decky-dualsense-wired-v0.5.4.zip`.
    Or download the archive to the Deck and choose **Install Plugin from ZIP File**.
 3. Confirm the installation. The plugin runs as root — this is needed for the virtual USB controller.
 4. Connect the DualSense over Bluetooth. In the game's properties **turn off Steam Input**.
