@@ -302,6 +302,7 @@ class Tester:
         self._last_poll = 0.0
         self._fd = -1
         self._target = None
+        self._wanted_mac = None      # controller picked on the page (None: the first one)
         self._input = None
         self._rate = 0
         self._reports = 0
@@ -316,6 +317,7 @@ class Tester:
         self._play_back_pending = False
         self._play_back_until = 0.0
         self._next_mic_check = 0.0
+        self._switch = False
         self.error = None
 
     # -- session --
@@ -335,6 +337,13 @@ class Tester:
         thread = self._thread
         if thread and thread is not threading.current_thread():
             thread.join(timeout=3)
+
+    def select(self, mac):
+        """Work with another controller (the page lists them when there are several)."""
+        self._wanted_mac = mac or None
+        target = self._target
+        if target and target["bridge"].controller.get("mac") != self._wanted_mac:
+            self._switch = True
 
     def set_capture(self, on):
         self._capture = bool(on)
@@ -381,9 +390,13 @@ class Tester:
                 "error": mic.error if mic else None,
             },
         }
+        result["controllers"] = [
+            {"mac": t["bridge"].controller.get("mac", ""), "name": t["bridge"].controller["name"]}
+            for t in self.manager.tester_targets()]
         if target:
             bridge = target["bridge"]
             result["controller"] = {"name": bridge.controller["name"], "mode": bridge.mode,
+                                    "mac": bridge.controller.get("mac", ""),
                                     "virtual_hidraw": bridge.virtual_hidraw, "edge": bridge.controller.get("pid") == 0x0DF2}
             source = getattr(bridge, "_mic", None)
             if source:
@@ -509,7 +522,7 @@ class Tester:
     # -- main loop --
 
     def _find_target(self):
-        target = self.manager.tester_target()
+        target = self.manager.tester_target(self._wanted_mac)
         if not target:
             return None
         node = target["bridge"].virtual_hidraw
@@ -559,6 +572,15 @@ class Tester:
                 if now - self._last_poll > IDLE_TIMEOUT:
                     self.log.info("Controller test page closed")
                     break
+                if self._switch:
+                    # Another controller picked: its own audio device and microphone too.
+                    self._switch = False
+                    self._close_target()
+                    for worker in (self._player, self._mic):
+                        if worker:
+                            worker.stop()
+                    self._player = self._mic = None
+                    self._click_mode = False
                 if self._target is None:
                     self._target = self._find_target()
                     if self._target is None:

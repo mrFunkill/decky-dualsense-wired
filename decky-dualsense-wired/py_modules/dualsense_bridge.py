@@ -1203,16 +1203,22 @@ class Manager:
                     except OSError:
                         pass
 
-    def tester_target(self):
-        """The controller the test page works with: the first one with a virtual controller."""
+    def tester_targets(self):
+        """Controllers the test page can work with: those with a virtual controller, in a fixed order."""
         with self._lock:
             bridges = list(self._bridges.items())
             streamers = dict(self._streamers)
-        bridges.sort(key=lambda kb: getattr(kb[1], "mode", "") != "usb-gadget")
-        for key, bridge in bridges:
-            if bridge.is_alive() and bridge.state == "active" and bridge.virtual_hidraw:
-                return {"bridge": bridge, "streamer": streamers.get(key)}
-        return None
+        bridges.sort(key=lambda kb: (getattr(kb[1], "mode", "") != "usb-gadget", kb[0]))
+        return [{"bridge": bridge, "streamer": streamers.get(key)} for key, bridge in bridges
+                if bridge.is_alive() and bridge.state == "active" and bridge.virtual_hidraw]
+
+    def tester_target(self, mac=None):
+        """The controller with that MAC, else the first one."""
+        targets = self.tester_targets()
+        for target in targets:
+            if mac and target["bridge"].controller.get("mac") == mac:
+                return target
+        return targets[0] if targets else None
 
     def _stop_all(self):
         self._stop_streamers()

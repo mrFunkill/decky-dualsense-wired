@@ -21,7 +21,8 @@ interface InputState {
 interface TesterState {
   running: boolean;
   error: string | null;
-  controller: { name: string; mode: string; virtual_hidraw: string; edge: boolean } | null;
+  controller: { name: string; mode: string; mac: string; virtual_hidraw: string; edge: boolean } | null;
+  controllers: { mac: string; name: string }[];
   input: InputState | null;
   rate: number;
   capture: boolean;
@@ -301,7 +302,7 @@ export function TestPage() {
   const checkList = CHECK_BUTTONS.concat(c?.edge ? EDGE_BUTTONS : []);
   const checked = checkList.filter((b) => seen.has(b)).length;
   const header = c
-    ? [c.name, c.mode === "usb-gadget" ? s.virtualUsb : "uhid", s.rate(state.rate),
+    ? [c.name, c.mac.slice(-5).toUpperCase(), c.mode === "usb-gadget" ? s.virtualUsb : "uhid", s.rate(state.rate),
        input ? `🔋 ${input.battery}%${input.charging ? " ⚡" : ""}` : "",
        input?.headphones ? (input.headset_mic ? s.headsetPlugged : s.headphonesPlugged) : ""]
       .filter(Boolean).join(" · ")
@@ -314,6 +315,19 @@ export function TestPage() {
       <div style={{ fontSize: "20px", fontWeight: "bold" }}>{s.title}</div>
       <Note>{header}</Note>
       {(message || state.error) && <div style={{ color: "#ff6b6b", fontSize: "13px" }}>{message || state.error}</div>}
+
+      {state.controllers.length > 1 && (
+        <Section title={s.controllers}>
+          <ButtonRow buttons={state.controllers.map((ctl, i) => ({
+            label: `${ctl.mac === c?.mac ? "● " : ""}${s.controllerN(i + 1)}`,
+            onClick: () => {
+              setSeen(new Set());
+              act("select", { mac: ctl.mac });
+            },
+          }))} />
+          <Note>{s.controllersHint}</Note>
+        </Section>
+      )}
 
       <Section title={s.input}>
         <InputView state={state} seen={seen} />

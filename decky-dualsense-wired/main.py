@@ -90,6 +90,7 @@ class Plugin:
             "click_mode": lambda: self.tester.set_click_mode(args["on"]),
             "capture": lambda: self.tester.set_capture(args["on"]),
             "mic_record": lambda: self.tester.mic_record(),
+            "select": lambda: self.tester.select(args.get("mac")),
         }
         try:
             await asyncio.to_thread(handlers[action])
