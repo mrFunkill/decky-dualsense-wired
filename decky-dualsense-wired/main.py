@@ -11,6 +11,7 @@ from dualsense_bridge import Manager, remove_hide_rule
 from dualsense_tester import Tester
 from proton_prefixes import uninstall_all_detached
 from updater import Updater
+import report
 
 SETTINGS_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
 STEAM_ROOT = os.path.join(decky.DECKY_USER_HOME, ".local", "share", "Steam")
@@ -64,6 +65,20 @@ class Plugin:
             return {"ok": True, "version": version}
         except Exception as e:  # noqa: BLE001 - shown in the panel
             decky.logger.exception("Update failed")
+            return {"ok": False, "error": str(e)}
+
+    # Diagnostic report for bug reports: a zip in ~/Downloads (see report.py).
+    async def collect_report(self) -> dict:
+        try:
+            path = await asyncio.to_thread(
+                report.build, os.path.join(decky.DECKY_USER_HOME, "Downloads"), decky.DECKY_USER,
+                decky.DECKY_PLUGIN_LOG_DIR, SETTINGS_FILE, self.manager.status(),
+                {"Plugin": decky.DECKY_PLUGIN_VERSION, "Decky Loader": getattr(decky, "DECKY_VERSION", "?")},
+                decky.DECKY_USER)
+            decky.logger.info("Diagnostic report written to %s", path)
+            return {"ok": True, "path": path, "size": os.path.getsize(path)}
+        except Exception as e:  # noqa: BLE001 - shown in the panel
+            decky.logger.exception("Collecting the diagnostic report failed")
             return {"ok": False, "error": str(e)}
 
     # Controller test page: works with the virtual controller like a game does.

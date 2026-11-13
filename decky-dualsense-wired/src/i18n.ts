@@ -53,6 +53,13 @@ const en = {
 
   lowBattery: "DualSense: low battery",
 
+  report: "Bug report",
+  reportButton: "Collect logs",
+  reportBusy: "Collecting…",
+  reportDescription: "Saves the plugin logs and system details as a zip in Downloads. Attach it to an issue on github.com/mrFunkill/decky-dualsense-wired. MAC addresses are masked",
+  reportSaved: (path: string, kb: number) => `Saved: ${path} (${kb} KB). Attach it to an issue on github.com/mrFunkill/decky-dualsense-wired/issues`,
+  reportFailed: "Could not collect",
+
   updates: "Updates",
   version: (v: string) => `Version ${v}`,
   checkButton: "Check for updates",
@@ -182,6 +189,13 @@ const ru: Strings = {
   streamStats: (sent: number, underruns: number) => `пакетов ${sent} · пропусков ${underruns}`,
 
   lowBattery: "DualSense: низкий заряд",
+
+  report: "Отчёт об ошибке",
+  reportButton: "Собрать логи",
+  reportBusy: "Сбор…",
+  reportDescription: "Сохраняет логи плагина и сведения о системе в zip-архив в папке Загрузки. Приложите его к issue на github.com/mrFunkill/decky-dualsense-wired. MAC-адреса скрыты",
+  reportSaved: (path: string, kb: number) => `Сохранено: ${path} (${kb} КБ). Приложите файл к issue на github.com/mrFunkill/decky-dualsense-wired/issues`,
+  reportFailed: "Не удалось собрать",
 
   updates: "Обновления",
   version: (v: string) => `Версия ${v}`,

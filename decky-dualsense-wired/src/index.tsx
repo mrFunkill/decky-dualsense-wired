@@ -84,6 +84,32 @@ interface UpdateInfo {
 const checkUpdate = callable<[force: boolean], UpdateInfo>("check_update");
 const installUpdate = callable<[], { ok: boolean; version?: string; error?: string }>("install_update");
 
+const collectReport = callable<[], { ok: boolean; path?: string; size?: number; error?: string }>("collect_report");
+
+/** Collects logs and system details into a zip for a bug report. */
+function ReportSection() {
+  const [state, setState] = useState<"idle" | "busy">("idle");
+  const [result, setResult] = useState<string | undefined>();
+  const s = t();
+  return (
+    <PanelSection title={s.report}>
+      <PanelSectionRow>
+        <ButtonItem layout="below" disabled={state === "busy"} description={result ?? s.reportDescription}
+          onClick={async () => {
+            setState("busy");
+            const r = await collectReport().catch((e) => ({ ok: false, error: String(e) } as
+              { ok: boolean; path?: string; size?: number; error?: string }));
+            setResult(r.ok && r.path ? s.reportSaved(r.path, Math.ceil((r.size ?? 0) / 1024))
+              : `${s.reportFailed}: ${r.error}`);
+            setState("idle");
+          }}>
+          {state === "busy" ? s.reportBusy : s.reportButton}
+        </ButtonItem>
+      </PanelSectionRow>
+    </PanelSection>
+  );
+}
+
 /** Current version, a manual check against GitHub releases, and the update itself. */
 function UpdateSection() {
   const [info, setInfo] = useState<UpdateInfo | undefined>();
@@ -316,6 +342,7 @@ function Content() {
         </PanelSectionRow>
       </PanelSection>
       <AudioSection status={status} onStatus={setStatus} />
+      <ReportSection />
       <UpdateSection />
       {/* Keeps the last rows clear of the Quick Access Menu's bottom bar. */}
       <div style={{ height: "48px" }} />
