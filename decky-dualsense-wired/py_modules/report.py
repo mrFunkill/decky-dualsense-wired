@@ -54,7 +54,9 @@ def _read(path, limit=None):
 class Masker:
     """Replaces MAC addresses, also the colon-less form used in gadget names."""
 
-    def __init__(self, macs):
+    def __init__(self, macs, user=None):
+        # The account name shows in paths (/home/<user>/...); "deck" on a Steam Deck tells nothing.
+        self.user = user if user and user not in ("deck", "root") else None
         self.plain = {}
         for mac in macs:
             hexes = re.sub(r"[^0-9a-f]", "", mac.lower())
@@ -72,6 +74,8 @@ class Masker:
         text = MAC_COLON.sub(colon, text)
         for hexes, masked in self.plain.items():
             text = re.sub(hexes, masked, text, flags=re.I)
+        if self.user:
+            text = re.sub(r"\b%s\b" % re.escape(self.user), "<user>", text)
         return text
 
 
@@ -142,7 +146,7 @@ def build(out_dir, owner, log_dir, settings_file, status, versions, user="deck")
     status: the Manager's status() dict (controllers, settings in use, streams).
     """
     macs = [c.get("mac", "") for c in status.get("controllers", [])]
-    mask = Masker(macs)
+    mask = Masker(macs, user)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     name = "dualsense-wired-report-%s" % stamp
     parts = {

@@ -393,7 +393,9 @@ export function TestPage() {
       </Section>
 
       <Section title={s.mic}>
-        {!mic.enabled ? (
+        {c && c.mode !== "usb-gadget" ? (
+          <Note>{s.micNeedsGadget}</Note>
+        ) : !mic.enabled ? (
           <>
             <Note>{s.micOff}</Note>
             <ButtonRow buttons={[{ label: s.micEnable, onClick: () => setAudio({ mic: true }), disabled: audioOff }]} />

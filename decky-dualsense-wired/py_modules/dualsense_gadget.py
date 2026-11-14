@@ -74,8 +74,10 @@ def ensure_dummy_hcd(count=DUMMY_UDC_COUNT):
     if loaded:
         subprocess.run(["/usr/bin/modprobe", "-r", "dummy_hcd"], env=env, check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["/usr/bin/modprobe", "dummy_hcd", "num=%d" % count], env=env, check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(["/usr/bin/modprobe", "dummy_hcd", "num=%d" % count], env=env, check=False,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        return result.stderr.strip() or "modprobe dummy_hcd failed (%d)" % result.returncode
 
 
 def bound_udcs():

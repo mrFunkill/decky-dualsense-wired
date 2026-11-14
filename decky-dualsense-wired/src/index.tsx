@@ -68,6 +68,7 @@ interface Status {
   uhid_available: boolean;
   is_root: boolean;
   audio: AudioOptions;
+  gadget_error?: string | null;   // no virtual USB controller: no game audio device, no microphone
   controllers: ControllerStatus[];
 }
 
@@ -246,6 +247,11 @@ function AudioSection({ status, onStatus }: { status: Status; onStatus: (s: Stat
             <ToggleField label={s.mic} description={s.micDescription}
               checked={audio.mic} onChange={(value) => apply({ mic: value })} />
           </PanelSectionRow>
+          {status.gadget_error && (
+            <PanelSectionRow>
+              <Field label={s.noGadget} description={`${s.noGadgetDescription} (${status.gadget_error})`} />
+            </PanelSectionRow>
+          )}
           {!bluetooth && (
             <PanelSectionRow>
               <Field label={s.noBluetooth} description={s.noBluetoothDescription} />

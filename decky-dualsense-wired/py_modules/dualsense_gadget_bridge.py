@@ -45,13 +45,16 @@ PARK_TIMEOUT = 120.0
 
 
 def cleanup_stale(user):
-    """Remove gadgets and sinks left behind by a crashed instance; set up the virtual ports."""
+    """
+    Remove gadgets and sinks left behind by a crashed instance; set up the virtual ports.
+    Returns why the virtual ports could not be set up, or None.
+    """
     for name in gadget.our_gadgets():
         gadget.destroy(name)
     for line in _pactl(user, "list", "short", "modules").splitlines():
         if "sink_name=" + GAME_AUDIO_SINK in line or "source_name=dualsense_mic" in line:
             _pactl(user, "unload-module", line.split()[0])
-    gadget.ensure_dummy_hcd()
+    return gadget.ensure_dummy_hcd()
 
 
 def battery_from_status(status):

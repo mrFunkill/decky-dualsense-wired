@@ -843,6 +843,8 @@ class Bridge(threading.Thread):
             if report:
                 self._uhid_input(bytes(report))  # wired source: already USB format
             return
+        if len(report) > 1 and report[0] == DS_INPUT_REPORT_BT and report[1] & 0x02:
+            return      # a microphone frame, not controller state (see dualsense_mic.py)
         usb = bt_input_to_usb(report)
         if usb:
             self._uhid_input(usb)
@@ -930,6 +932,7 @@ class Manager:
         self.audio = dict(DEFAULT_STREAM_OPTIONS, enabled=False, game_audio=True)
         self.audio.update(audio or {})
         self._gadget_failed = False   # USB gadget backend unusable: uhid bridges only
+        self.gadget_error = None      # why (shown in the panel): no game audio device, no microphone
         self._streamers = {}  # hidraw -> AudioStreamer
         self._stream_failed_at = {}  # hidraw -> monotonic time of the last failed stream
         self._bridges = {}
@@ -947,7 +950,9 @@ class Manager:
         if not pause_requested():
             try:
                 from dualsense_gadget_bridge import cleanup_stale
-                cleanup_stale(self.user)
+                error = cleanup_stale(self.user)
+                if error:
+                    self.log.warning("Virtual USB ports unavailable: %s", error)
             except Exception:  # noqa: BLE001
                 self.log.exception("Cleaning up a stale USB gadget failed")
         self._parent = os.getppid()
@@ -1018,9 +1023,10 @@ class Manager:
         with self._lock:
             self.audio.update(options)
             self._stream_failed_at.clear()
-            streamers = list(self._streamers.values())
-        for s in streamers:
-            s.update(self._stream_options(s.options["source"], s.options.get("sink")))
+            streamers = list(self._streamers.items())
+            bridges = dict(self._bridges)
+        for key, s in streamers:
+            s.update(self._stream_options(s.options["source"], s.options.get("sink"), bridges.get(key)))
         with self._lock:
             bridges = list(self._bridges.values())
         for b in bridges:
@@ -1028,11 +1034,16 @@ class Manager:
                 b.mic_enabled = bool(self.audio.get("mic"))
         # Streams whose source changed are restarted, new ones started, by the next scan.
 
-    def _stream_options(self, source="system", sink=None):
+    def _stream_options(self, source="system", sink=None, bridge=None):
         options = {k: v for k, v in self.audio.items() if k not in ("enabled", "game_audio")}
         options["source"] = source
         if sink:
             options["sink"] = sink
+        if getattr(bridge, "mode", "") != "usb-gadget":
+            # The microphone needs the virtual USB controller (its source, hid-generic). Without
+            # it the voice frames would reach hid-playstation as random mute button presses, and
+            # its LED/mute reports in reply flood the link until the controller disconnects.
+            options["mic"] = False
         return options
 
     def _stop_streamers(self, keys=None):
@@ -1083,7 +1094,7 @@ class Manager:
                     continue
                 sink = getattr(self._bridges[key], "sink_name", None) if source == "controller" else None
                 streamer = AudioStreamer("/dev/" + key, self.log, user=self.user,
-                                         options=self._stream_options(source, sink))
+                                         options=self._stream_options(source, sink, self._bridges[key]))
                 self._streamers[key] = streamer
                 streamer.start()
                 # One steady stream to the controller: game output rides in it.
@@ -1149,6 +1160,7 @@ class Manager:
             "uhid_available": os.path.exists("/dev/uhid"),
             "is_root": os.geteuid() == 0,
             "audio": audio,
+            "gadget_error": self.gadget_error,
             "controllers": result,
         }
 
@@ -1293,6 +1305,7 @@ class Manager:
                         # The gadget could not be created: bridge the uhid way from now on.
                         self.log.warning("USB gadget backend failed (%s), using uhid bridges", bridge.error)
                         self._gadget_failed = True
+                        self.gadget_error = bridge.error
                     elif bridge.state == "error":
                         self._failed[key] = (time.monotonic(), bridge.status())
                     del self._bridges[key]
@@ -1355,7 +1368,12 @@ class Manager:
         from dualsense_gadget_bridge import GadgetBridge, can_use_gadget
         in_use = sum(1 for b in list(self._bridges.values()) + list(self._parked.values())
                      if getattr(b, "mode", "") == "usb-gadget" and b.is_alive())
-        ports = len(glob.glob("/sys/class/udc/dummy_udc.*")) or dualsense_gadget.DUMMY_UDC_COUNT
+        ports = len(glob.glob("/sys/class/udc/dummy_udc.*"))
+        if not ports and not self._gadget_failed and can_use_gadget(c):
+            # Kernels without dummy_hcd (e.g. some Bazzite builds): no virtual USB controller.
+            self._gadget_failed = True
+            self.gadget_error = "no virtual USB ports: the kernel has no dummy_hcd module"
+            self.log.warning("USB gadget backend unavailable (%s), using uhid bridges", self.gadget_error)
         if not self._gadget_failed and in_use < ports and can_use_gadget(c):
             bridge = GadgetBridge(c, self.log, user=self.user)
             bridge.mic_enabled = bool(self.audio.get("mic"))
