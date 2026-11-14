@@ -47,7 +47,7 @@ Requires [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
 1. In Decky: ⚙ **Settings → General** → turn on **Developer mode**.
 2. On the new **Developer** tab choose **Install Plugin from URL** and paste the link to the archive from
    the [latest release](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), e.g.
-   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.4/decky-dualsense-wired-v0.5.4.zip`.
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.5/decky-dualsense-wired-v0.5.5.zip`.
    Or download the archive to the Deck and choose **Install Plugin from ZIP File**.
 3. Confirm the installation. The plugin runs as root — this is needed for the virtual USB controller.
 4. Connect the DualSense over Bluetooth. In the game's properties **turn off Steam Input**.
@@ -105,6 +105,9 @@ Prefix registries are only changed while the prefix is not running, keeping the 
 
 ## Limitations
 
+- Game audio and the microphone need the `dummy_hcd` kernel module (virtual USB). SteamOS has it;
+  some other systems (e.g. Bazzite builds) don't. The controller then still works as a wired one,
+  without them, and only "All Deck audio" goes to the controller — the plugin panel says so.
 - Game audio and HD haptics for up to four controllers at once; only tested with one so far.
 - While the microphone is on, the Bluetooth controller is bound to `hid-generic` instead of
   `hid-playstation`, which mistakes the microphone packets for mute button presses. Turning the

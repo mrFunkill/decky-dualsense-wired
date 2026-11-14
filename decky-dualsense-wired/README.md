@@ -48,7 +48,7 @@ Helldivers 2 — динамик, HD-вибрация и адаптивные т�
 2. На появившейся вкладке **Разработчик** (Developer) выберите **Установить плагин по URL**
    (Install Plugin from URL) и вставьте ссылку
    на архив из [последнего релиза](https://github.com/mrFunkill/decky-dualsense-wired/releases/latest), например:
-   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.4/decky-dualsense-wired-v0.5.4.zip`.
+   `https://github.com/mrFunkill/decky-dualsense-wired/releases/download/v0.5.5/decky-dualsense-wired-v0.5.5.zip`.
    Либо скачайте архив на Deck и выберите **Установить плагин из ZIP-файла** (Install Plugin from ZIP File).
 3. Подтвердите установку. Плагин работает от root — это нужно для виртуального USB-контроллера.
 4. Подключите DualSense по Bluetooth. В свойствах игры **выключите Steam Input**.
@@ -104,6 +104,9 @@ Helldivers 2 — динамик, HD-вибрация и адаптивные т�
 
 ## Ограничения
 
+- Звуку игр и микрофону нужен модуль ядра `dummy_hcd` (виртуальный USB). В SteamOS он есть; в
+  некоторых других системах (например, сборках Bazzite) его нет. Тогда геймпад работает как
+  проводной без них, а на геймпад идёт только «Весь звук Deck» — панель плагина об этом сообщает.
 - Звук игр и HD-вибрация — для четырёх геймпадов одновременно; с несколькими геймпадами
   сразу это пока не проверялось на практике (только с одним).
 - Пока микрофон включён, к Bluetooth-геймпаду вместо драйвера `hid-playstation` подключается
